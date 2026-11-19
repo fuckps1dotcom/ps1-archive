@@ -1,0 +1,18 @@
+local loc = game.Players.LocalPlayer
+local mod = require(loc.PlayerGui.Library)
+local mys = mod.Stats
+local mot = mod.OtherStats
+local rem = workspace.__REMOTES.Core['Get Other Stats']
+local lastupdate = os.clock()
+
+local delay_ms = 800
+
+_G.guifix = _G.guifix or game:GetService'RunService'.Stepped:Connect(function()
+	if os.clock() - lastupdate > delay_ms/1000 then
+		local new = rem:InvokeServer()
+		mys.Cache = new[loc.Name]
+		mot.Cache = new
+		loc.PlayerGui.Events.StatChanged:Fire()
+		lastupdate = os.clock()
+	end
+end)
