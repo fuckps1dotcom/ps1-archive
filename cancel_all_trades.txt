@@ -1,0 +1,26 @@
+local t=nil
+local h = Instance.new('Hint', workspace)
+
+local con = game:FindFirstChild('Trade Update', true).OnClientEvent:Connect(function(id)
+	t=id
+end)
+h.Text = 'Trading self'
+workspace.__REMOTES.Game.Trading:InvokeServer("InvSend",game.Players.LocalPlayer)
+repeat task.wait() until t
+con:Disconnect()
+h.Text = 'Cancelling ' .. t.. ' trades'
+local b = 0
+for i = 1, t do
+	task.spawn(function()
+		workspace.__REMOTES.Game.Trading:InvokeServer("Cancel", t)
+		b = b + 1
+	end)
+end
+
+repeat task.wait() until b == t
+
+h.Text = 'Done'
+
+wait(1)
+h:Destroy()
+
