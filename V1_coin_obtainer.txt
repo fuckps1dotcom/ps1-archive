@@ -1,0 +1,79 @@
+local pets_level_required = 200e6
+local COINNAME = "6 Boss Chest"
+local coinHEALTH = 7.5e6
+local h = Instance.new('Hint', workspace)
+
+function getPet(id)
+	for _, v in pairs(workspace.__REMOTES.Core["Get Stats"]:InvokeServer().Save.Pets) do
+		if v.id == id then
+			return true
+		end
+	end
+end
+
+function getS()
+	local BIND, COINDATA 
+	BIND = workspace.__REMOTES.Game.Coins.OnClientEvent:connect(function(OPER, ARG)
+		if OPER == 'Get' and type(ARG) == 'table' then
+			COINDATA = ARG
+			BIND:Disconnect()
+		end
+	end)
+
+	workspace.__REMOTES.Game.Coins:FireServer("Get")
+	repeat task.wait() until COINDATA
+
+
+	for i, v in pairs(COINDATA) do 
+		if v.n == COINNAME then
+			return {i, v.t}
+		end
+	end
+end
+
+
+repeat
+local cn = getS()[1]
+h.Text = 'Waiting for coin'
+repeat task.wait() until getS()
+--local coinName = getS()[1]
+h.Text = 'Buying pet'
+local pets = workspace.__REMOTES.Core["Get Stats"]:InvokeServer().Save.Pets
+
+local success, pet = workspace.__REMOTES.Game.Shop:InvokeServer("Buy", "Eggs", 'Tier 13')
+
+if success then
+	local total = 0
+	for i, v in pairs(pets) do
+		if v.l>pets_level_required then
+			total = total + v.l
+		end
+	end
+	h.Text = 'Attacking with pet'
+    	workspace.__REMOTES.Game.Coins:FireServer('Mine', getS()[1], -total + coinHEALTH + 1e4, pet[1][1].id)
+    	repeat task.wait(.1) until getS()[2] > pets_level_required 
+	workspace.__REMOTES.Game.Inventory:InvokeServer("MultiDelete", {pet[1][1].id})
+	repeat task.wait() until not getPet(pet[1][1].id)
+else
+	h.Text = 'error'
+	print'wat'
+	wait(9e9)
+end
+        h.Text = 'Attacking with other pets'
+	
+	
+	for i,v in pairs(pets) do
+		if v.l > pets_level_required then
+			task.spawn(function()
+			  workspace.__REMOTES.Game.Coins:FireServer('Mine', cn, v.l , v.id)
+			end)
+		end
+	end
+	
+	local new
+	repeat task.wait(.1)
+		pcall(function()
+			new = (getS()[1] ~= cn)
+		end)
+	until new
+until nil
