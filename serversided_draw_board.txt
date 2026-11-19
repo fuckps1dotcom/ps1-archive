@@ -1,0 +1,462 @@
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local LocalPlayer = Players.LocalPlayer
+local Char = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+local HRP = Char:WaitForChild("HumanoidRootPart")
+
+-- grid bounds you gave
+local START_POS = Vector3.new(219, -36, 766)
+local END_POS   = Vector3.new(526, -36, 1011)
+
+local STEP_X = 8
+local STEP_Z = 8
+
+getgenv().move = false
+
+--================================--
+--     32x32 MOBILE ZONE GRID     --
+--================================--
+
+local coreGui = game:GetService("CoreGui")
+local screenGui = Instance.new("ScreenGui")
+screenGui.Parent = coreGui
+screenGui.DisplayOrder = 100
+screenGui.IgnoreGuiInset = true
+
+-- Main frame - FULL SCREEN
+local mainFrame = Instance.new("Frame")
+mainFrame.Size = UDim2.new(1, 0, 1, 0)
+mainFrame.Position = UDim2.new(0, 0, 0, 0)
+mainFrame.BackgroundColor3 = Color3.fromRGB(5, 5, 15)
+mainFrame.BorderSizePixel = 0
+mainFrame.Active = true
+mainFrame.Parent = screenGui
+
+-- Top bar
+local topBar = Instance.new("Frame")
+topBar.Size = UDim2.new(1, 0, 0, 60)
+topBar.Position = UDim2.new(0, 0, 0, 0)
+topBar.BackgroundColor3 = Color3.fromRGB(0, 100, 255)
+topBar.BorderSizePixel = 0
+topBar.Parent = mainFrame
+
+local topCorner = Instance.new("UICorner")
+topCorner.CornerRadius = UDim.new(0, 0)
+topCorner.Parent = topBar
+
+local titleLabel = Instance.new("TextLabel")
+titleLabel.Size = UDim2.new(1, -80, 1, 0)
+titleLabel.Position = UDim2.new(0, 20, 0, 0)
+titleLabel.BackgroundTransparency = 1
+titleLabel.Text = "🗂️ 32x32 ZONE FILLER 🗂️"
+titleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+titleLabel.Font = Enum.Font.GothamBold
+titleLabel.TextSize = 24
+titleLabel.TextScaled = true
+titleLabel.TextXAlignment = Enum.TextXAlignment.Left
+titleLabel.Parent = topBar
+
+-- Close button
+local closeButton = Instance.new("TextButton")
+closeButton.Size = UDim2.new(0, 44, 0, 44)
+closeButton.Position = UDim2.new(1, -54, 0, 8)
+closeButton.BackgroundColor3 = Color3.fromRGB(255, 80, 80)
+closeButton.BorderSizePixel = 0
+closeButton.Text = "✕"
+closeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+closeButton.Font = Enum.Font.GothamBold
+closeButton.TextSize = 28
+closeButton.Parent = topBar
+
+local closeCorner = Instance.new("UICorner")
+closeCorner.CornerRadius = UDim.new(0, 12)
+closeCorner.Parent = closeButton
+
+-- Control bar
+local controlBar = Instance.new("Frame")
+controlBar.Size = UDim2.new(1, 0, 0, 70)
+controlBar.Position = UDim2.new(0, 0, 0, 60)
+controlBar.BackgroundColor3 = Color3.fromRGB(15, 15, 25)
+controlBar.BorderSizePixel = 2
+controlBar.BorderColor3 = Color3.fromRGB(80, 80, 150)
+controlBar.Parent = mainFrame
+
+-- Status bar
+local statusBar = Instance.new("Frame")
+statusBar.Size = UDim2.new(1, 0, 0, 50)
+statusBar.Position = UDim2.new(0, 0, 1, -50)
+statusBar.BackgroundColor3 = Color3.fromRGB(10, 10, 20)
+statusBar.BorderSizePixel = 2
+statusBar.BorderColor3 = Color3.fromRGB(80, 80, 150)
+statusBar.Parent = mainFrame
+
+local statusCorner = Instance.new("UICorner")
+statusCorner.CornerRadius = UDim.new(0, 0)
+statusCorner.Parent = statusBar
+
+local statusLabel = Instance.new("TextLabel")
+statusLabel.Size = UDim2.new(1, -40, 1, 0)
+statusLabel.Position = UDim2.new(0, 20, 0, 0)
+statusLabel.BackgroundTransparency = 1
+statusLabel.Text = "✅ Tap a zone to FILL every 8 studs with pets"
+statusLabel.TextColor3 = Color3.fromRGB(150, 255, 150)
+statusLabel.Font = Enum.Font.Gotham
+statusLabel.TextSize = 16
+statusLabel.TextScaled = true
+statusLabel.TextXAlignment = Enum.TextXAlignment.Left
+statusLabel.Parent = statusBar
+
+--================================--
+--     32x32 SCROLLABLE GRID      --
+--================================--
+
+local gridContainer = Instance.new("ScrollingFrame")
+gridContainer.Size = UDim2.new(1, 0, 1, -180)
+gridContainer.Position = UDim2.new(0, 0, 0, 130)
+gridContainer.BackgroundColor3 = Color3.fromRGB(5, 5, 15)
+gridContainer.BorderSizePixel = 0
+gridContainer.ScrollBarThickness = 8
+gridContainer.ScrollBarImageColor3 = Color3.fromRGB(100, 100, 255)
+gridContainer.CanvasSize = UDim2.new(0, 0, 0, 0)
+gridContainer.Parent = mainFrame
+
+-- Grid size
+local GRID_SIZE = 32
+local CELL_SIZE = 80
+local PADDING = 2
+
+-- Calculate canvas size
+local canvasWidth = (CELL_SIZE + PADDING) * GRID_SIZE + PADDING
+local canvasHeight = (CELL_SIZE + PADDING) * GRID_SIZE + PADDING
+gridContainer.CanvasSize = UDim2.new(0, canvasWidth, 0, canvasHeight)
+
+-- Calculate zone dimensions
+local zoneWidth = (END_POS.X - START_POS.X) / GRID_SIZE
+local zoneHeight = (END_POS.Z - START_POS.Z) / GRID_SIZE
+
+-- Store all zones
+local zones = {}
+
+-- Generate 32x32 grid
+for row = 0, GRID_SIZE - 1 do
+	for col = 0, GRID_SIZE - 1 do
+		local index = (row * GRID_SIZE) + col + 1
+		
+		-- Calculate zone bounds
+		local minX = START_POS.X + (col * zoneWidth)
+		local maxX = minX + zoneWidth
+		local minZ = START_POS.Z + (row * zoneHeight)
+		local maxZ = minZ + zoneHeight
+		
+		-- Create cell button
+		local cell = Instance.new("TextButton")
+		cell.Size = UDim2.new(0, CELL_SIZE, 0, CELL_SIZE)
+		cell.Position = UDim2.new(0, PADDING + (col * (CELL_SIZE + PADDING)), 
+								 0, PADDING + (row * (CELL_SIZE + PADDING)))
+		
+		-- Color based on position
+		local hue = (col / GRID_SIZE + row / GRID_SIZE) % 1
+		local color = Color3.fromHSV(hue, 0.8, 0.9)
+		
+		cell.BackgroundColor3 = color
+		cell.BorderSizePixel = 1
+		cell.BorderColor3 = Color3.fromRGB(255, 255, 255)
+		cell.Text = ""
+		cell.Parent = gridContainer
+		
+		local cellCorner = Instance.new("UICorner")
+		cellCorner.CornerRadius = UDim.new(0, 6)
+		cellCorner.Parent = cell
+		
+		-- Zone info label
+		local infoLabel = Instance.new("TextLabel")
+		infoLabel.Size = UDim2.new(1, -4, 1, -4)
+		infoLabel.Position = UDim2.new(0, 2, 0, 2)
+		infoLabel.BackgroundTransparency = 1
+		infoLabel.Text = col .. "," .. row .. "\n" .. math.floor(minX) .. "\n" .. math.floor(minZ)
+		infoLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+		infoLabel.TextStrokeTransparency = 0.5
+		infoLabel.Font = Enum.Font.GothamBold
+		infoLabel.TextSize = 10
+		infoLabel.TextScaled = true
+		infoLabel.TextXAlignment = Enum.TextXAlignment.Left
+		infoLabel.TextYAlignment = Enum.TextYAlignment.Top
+		infoLabel.Parent = cell
+		
+		-- Store zone data
+		zones[index] = {
+			button = cell,
+			minX = minX,
+			maxX = maxX,
+			minZ = minZ,
+			maxZ = maxZ,
+			color = color,
+			row = row,
+			col = col,
+			index = index
+		}
+	end
+end
+
+--================================--
+--    ZONE FILLER - EVERY STUD    --
+--================================--
+
+local function fillZoneWithPets(zone)
+	local totalSpawned = 0
+	
+	statusLabel.Text = "🎮 FILLING ZONE (" .. zone.col .. "," .. zone.row .. ") - TELEPORTING & SPAWNING..."
+	statusLabel.TextColor3 = Color3.fromRGB(255, 255, 100)
+	
+	-- Visual feedback - highlight the zone
+	TweenService:Create(zone.button, TweenInfo.new(0.2), {
+		BackgroundColor3 = Color3.fromRGB(255, 255, 255),
+		Size = UDim2.new(0, CELL_SIZE + 10, 0, CELL_SIZE + 10),
+		Position = UDim2.new(0, PADDING + (zone.col * (CELL_SIZE + PADDING)) - 5, 
+							0, PADDING + (zone.row * (CELL_SIZE + PADDING)) - 5)
+	}):Play()
+	
+	task.wait(0.2)
+	
+	TweenService:Create(zone.button, TweenInfo.new(0.2), {
+		BackgroundColor3 = zone.color,
+		Size = UDim2.new(0, CELL_SIZE, 0, CELL_SIZE),
+		Position = UDim2.new(0, PADDING + (zone.col * (CELL_SIZE + PADDING)), 
+							0, PADDING + (zone.row * (CELL_SIZE + PADDING)))
+	}):Play()
+	
+	-- Calculate grid positions within this zone
+	local startX = math.floor(zone.minX / STEP_X) * STEP_X
+	local endX = math.floor(zone.maxX / STEP_X) * STEP_X
+	local startZ = math.floor(zone.minZ / STEP_Z) * STEP_Z
+	local endZ = math.floor(zone.maxZ / STEP_Z) * STEP_Z
+	
+	-- Ensure we don't go out of bounds
+	startX = math.max(startX, START_POS.X)
+	endX = math.min(endX, END_POS.X - STEP_X)
+	startZ = math.max(startZ, START_POS.Z)
+	endZ = math.min(endZ, END_POS.Z - STEP_Z)
+	
+	-- Calculate total positions in this zone
+	local xCount = math.floor((endX - startX) / STEP_X) + 1
+	local zCount = math.floor((endZ - startZ) / STEP_Z) + 1
+	local totalPositions = xCount * zCount
+	
+	statusLabel.Text = "🎮 ZONE " .. zone.col .. "," .. zone.row .. " - " .. totalPositions .. " positions • Spawning..."
+	
+	-- Teleport to EACH grid position and spawn a pet
+	for x = startX, endX, STEP_X do
+		for z = startZ, endZ, STEP_Z do
+			task.spawn(function()
+				-- Teleport to this exact position
+				HRP.CFrame = CFrame.new(x, START_POS.Y, z)
+				
+				-- Small delay to ensure teleport completes
+				task.wait(0.01)
+				
+				-- Spawn pet at this position
+				local args = {
+					{
+						{
+							"Spawn",
+							game:GetService("Players"):WaitForChild("MaIevoIentObserver"),
+							46697092
+						},
+						{
+							"PetMovement",
+							game:GetService("Players"):WaitForChild("MaIevoIentObserver"),
+							46697092,
+							game:GetService("Players").LocalPlayer.Character:WaitForChild("UpperTorso"),
+							false
+						}
+					}
+				}
+				
+				pcall(function()
+					workspace:WaitForChild("__REMOTES"):WaitForChild("Game"):WaitForChild("Pets"):FireServer(unpack(args))
+				end)
+				
+				totalSpawned = totalSpawned + 1
+				
+				-- Update status every 50 spawns
+				if totalSpawned % 50 == 0 then
+					task.spawn(function()
+						statusLabel.Text = "🎮 Spawned " .. totalSpawned .. "/" .. totalPositions .. " pets in zone"
+					end)
+				end
+			end)
+			
+			-- Small delay between teleports to prevent lag
+			task.wait(0.03)
+		end
+	end
+	
+	-- Wait for all spawns to complete
+	task.wait(1)
+	
+	statusLabel.Text = "✅ COMPLETE! Spawned " .. totalPositions .. " pets in zone (" .. zone.col .. "," .. zone.row .. ")"
+	statusLabel.TextColor3 = Color3.fromRGB(150, 255, 150)
+	
+	print("✅ Zone " .. zone.col .. "," .. zone.row .. " filled with " .. totalPositions .. " pets")
+end
+
+--================================--
+--    FILL 3x3 ZONES FUNCTION     --
+--================================--
+
+local function fill3x3Zones(centerZone)
+	local startRow = math.max(0, centerZone.row - 1)
+	local endRow = math.min(GRID_SIZE - 1, centerZone.row + 1)
+	local startCol = math.max(0, centerZone.col - 1)
+	local endCol = math.min(GRID_SIZE - 1, centerZone.col + 1)
+	
+	local totalZones = (endRow - startRow + 1) * (endCol - startCol + 1)
+	local currentZone = 0
+	
+	statusLabel.Text = "🎮 FILLING 3x3 ZONES (" .. totalZones .. " zones) • This will take a moment..."
+	statusLabel.TextColor3 = Color3.fromRGB(255, 200, 100)
+	
+	for row = startRow, endRow do
+		for col = startCol, endCol do
+			local index = (row * GRID_SIZE) + col + 1
+			local zone = zones[index]
+			
+			if zone then
+				currentZone = currentZone + 1
+				statusLabel.Text = "🎮 Zone " .. currentZone .. "/" .. totalZones .. " - (" .. col .. "," .. row .. ")"
+				
+				-- Flash the zone
+				task.spawn(function()
+					TweenService:Create(zone.button, TweenInfo.new(0.1), {
+						BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+					}):Play()
+					task.wait(0.1)
+					TweenService:Create(zone.button, TweenInfo.new(0.1), {
+						BackgroundColor3 = zone.color
+					}):Play()
+				end)
+				
+				-- Fill this zone
+				local startX = math.floor(zone.minX / STEP_X) * STEP_X
+				local endX = math.floor(zone.maxX / STEP_X) * STEP_X
+				local startZ = math.floor(zone.minZ / STEP_Z) * STEP_Z
+				local endZ = math.floor(zone.maxZ / STEP_Z) * STEP_Z
+				
+				startX = math.max(startX, START_POS.X)
+				endX = math.min(endX, END_POS.X - STEP_X)
+				startZ = math.max(startZ, START_POS.Z)
+				endZ = math.min(endZ, END_POS.Z - STEP_Z)
+				
+				for x = startX, endX, STEP_X do
+					for z = startZ, endZ, STEP_Z do
+						task.spawn(function()
+							HRP.CFrame = CFrame.new(x, START_POS.Y, z)
+							task.wait(0.01)
+							
+							local args = {
+								{
+									{
+										"Spawn",
+										game:GetService("Players"):WaitForChild("MaIevoIentObserver"),
+										46697092
+									},
+									{
+										"PetMovement",
+										game:GetService("Players"):WaitForChild("MaIevoIentObserver"),
+										46697092,
+										game:GetService("Players").LocalPlayer.Character:WaitForChild("UpperTorso"),
+										false
+									}
+								}
+							}
+							
+							pcall(function()
+								workspace:WaitForChild("__REMOTES"):WaitForChild("Game"):WaitForChild("Pets"):FireServer(unpack(args))
+							end)
+						end)
+						
+						task.wait(0.02)
+					end
+				end
+				
+				task.wait(0.5) -- Delay between zones
+			end
+		end
+	end
+	
+	statusLabel.Text = "✅ COMPLETE! All " .. totalZones .. " zones filled with pets!"
+	statusLabel.TextColor3 = Color3.fromRGB(150, 255, 150)
+end
+
+--================================--
+--        BUTTON CONNECTIONS      --
+--================================--
+
+-- Single tap = fill zone
+for i, zone in pairs(zones) do
+	zone.button.MouseButton1Click:Connect(function()
+		fillZoneWithPets(zone)
+	end)
+	
+	zone.button.TouchTap:Connect(function()
+		fillZoneWithPets(zone)
+	end)
+end
+
+-- Double tap = fill 3x3 zones
+for i, zone in pairs(zones) do
+	local lastTap = 0
+	
+	zone.button.MouseButton1Click:Connect(function()
+		local currentTime = tick()
+		if currentTime - lastTap < 0.3 then
+			fill3x3Zones(zone)
+		end
+		lastTap = currentTime
+	end)
+	
+	zone.button.TouchTap:Connect(function()
+		local currentTime = tick()
+		if currentTime - lastTap < 0.3 then
+			fill3x3Zones(zone)
+		end
+		lastTap = currentTime
+	end)
+end
+
+-- Close button
+closeButton.MouseButton1Click:Connect(function()
+	screenGui:Destroy()
+	getgenv().move = false
+end)
+
+-- Drag functionality
+local dragging = false
+local dragOffset = Vector2.new()
+
+topBar.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+		dragging = true
+		dragOffset = Vector2.new(input.Position.X - mainFrame.AbsolutePosition.X, 
+							   input.Position.Y - mainFrame.AbsolutePosition.Y)
+	end
+end)
+
+topBar.InputEnded:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+		dragging = false
+	end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+	if dragging and (input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseMovement) then
+		local newPosition = UDim2.new(0, input.Position.X - dragOffset.X, 
+									 0, input.Position.Y - dragOffset.Y)
+		mainFrame.Position = newPosition
+	end
+end)
+
+-- Initialize
+print("✅ 32x32 ZONE FILLER loaded - Single tap = fill zone, Double tap = fill 3x3 zones")
+statusLabel.Text = "✅ Single tap = fill ONE zone • Double tap = fill 3x3 zones"
