@@ -1,0 +1,67 @@
+--!nocheck
+-- levelup_broadcast.luau
+-- Makes EVERY other player play the pet level-up effect on your pets.
+--
+-- The game's 'Pets' RemoteEvent is client -> server -> every other client, so this
+-- makes each of them run, for each of your pets:
+--     Library.Pets.LevelUp(<you>, <petId>, <level>)
+--
+-- LevelUp draws wherever the pet model exists, i.e. the receiver already has
+-- Workspace.__DEBRIS.Pets[<you>][<petId>] - true for pets you have EQUIPPED.
+-- The server skips the sender, so LevelUp is also called locally to see it yourself.
+-- Every pet goes in one payload per tick, so this is a single remote event per second.
+
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+local REMOTES = workspace:WaitForChild("__REMOTES")
+local Pets = REMOTES:WaitForChild("Game"):WaitForChild("Pets")
+local Library = require(LocalPlayer:WaitForChild("PlayerGui"):WaitForChild("Library"))
+-- Alive in Real's live-reload; falls back to always-true in a plain executor.
+local STATE = STATE or { alive = function() return true end }
+
+-- CONFIG --------------------------------------------------------------------
+local INTERVAL  = 1        -- seconds between ticks
+local DAY       = 86400    -- ticks per full cycle (86400 = 24h at 1/sec)
+local ADD       = 500000   -- levels added over a full cycle   <<< LEVEL AMOUNT
+local START     = 0        -- flat bonus on top of each pet's own level
+local LOCAL_TOO = true     -- also show the effect on your own screen
+--
+-- level shown = pet's own level + START + (tick / DAY) * ADD
+-- ---------------------------------------------------------------------------
+
+local function myPets()
+    local ok, stats = pcall(function()
+        return REMOTES.Core["Get Stats"]:InvokeServer()
+    end)
+    if ok and stats and stats.Save and stats.Save.Pets then
+        return stats.Save.Pets
+    end
+    return Library.Stats.Get(true).Save.Pets
+end
+
+local pets = {}
+for _, v in ipairs(myPets()) do
+    pets[#pets + 1] = { id = tostring(v.id), base = v.l }
+end
+
+local i = 0
+while STATE.alive() and i < DAY do
+    i = i + 1
+    local commands = {}
+    for _, p in ipairs(pets) do
+        local level = math.floor(p.base + START + (i / DAY * ADD))
+        commands[#commands + 1] = { "LevelUp", LocalPlayer, p.id, level }
+
+        if LOCAL_TOO then
+            task.spawn(function()
+                Library.Pets.LevelUp(LocalPlayer, p.id, level)   -- your screen
+            end)
+        end
+    end
+
+    Pets:FireServer(commands)                                   -- everyone else
+
+    task.wait(INTERVAL)
+end
+
+print(("[levelup_broadcast] %d pet(s), +%d over %d ticks"):format(#pets, ADD, DAY))
