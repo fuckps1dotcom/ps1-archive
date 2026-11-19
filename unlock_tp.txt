@@ -1,0 +1,11 @@
+local Players = game:GetService("Players")
+local pl = Players.LocalPlayer
+
+local tb = pl.PlayerGui.Side.Frame.SideButtons.Teleport
+local tg = pl.PlayerGui.Teleport
+
+tg.Enabled = false
+
+tb.MouseButton1Click:Connect(function()
+	tg.Enabled = true
+end)
