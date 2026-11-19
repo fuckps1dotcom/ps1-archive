@@ -1,0 +1,472 @@
+--[[
+	Twitter code brute forcer  (random picker + PERSISTENT tried-code list)
+
+	Remote: workspace.__REMOTES.Game.Twitter :InvokeServer("Redeem", code)
+	Codes are "c" + 10 digits, e.g. c0000123456.
+	The server answers (v1, v2): v1 == true means the code was redeemed,
+	v1 == false with v2 == "Code does not exist." means it is not a code.
+
+	------------------------------------------------------------------
+	WHAT CHANGED FROM THE ORIGINAL SCRIPT
+	------------------------------------------------------------------
+	The original kept its "already tried" list in _G.save, which lives in
+	RAM only. A teleport, a rejoin or closing Roblox wiped it and the
+	script started guessing codes it had already sent. That is now fixed:
+
+	  * EVERY code that goes out is appended to
+	      %LOCALAPPDATA%\Real\workspace\codebrute\tried.txt
+	    (one code per line). The file is append only - it is never
+	    rewritten, so it always holds the complete history.
+	  * On start that file is read back and every code in it goes into
+	    the in-memory skip set, so a code that was already tried is NEVER sent
+	    again - not after a rejoin, not after a teleport, not after
+	    closing and reopening Roblox.
+	  * Live codes are appended to codebrute\hits.txt (code TAB msg TAB
+	    time). Codes that exist but are already redeemed go to
+	    codebrute\found.txt (same format).
+
+	------------------------------------------------------------------
+	LOSSLESS SKIP SET
+	------------------------------------------------------------------
+	The skip set is keyed by the numeric value of the 10 digits (a 10 digit
+	string always maps to a unique number), so a million codes cost a
+	fraction of what a table of strings would.
+
+	There is NO trimming. An earlier version dropped the oldest 25% of the
+	list when it passed 1,000,000 entries and rewrote tried.txt, which
+	silently forgot those codes and let them be sent again. Now the list is
+	never trimmed: when it reaches maxTried (default 20,000,000) the run
+	STOPS with a message instead of forgetting anything.
+
+	------------------------------------------------------------------
+	CONTROL
+	------------------------------------------------------------------
+	  getgenv().CodeBrute.running = false   -- stop
+	  getgenv().CodeBrute.running = true    -- resume
+	  getgenv().CodeBrute.rate = 450         -- requests/second (default 600)
+	  getgenv().CodeBrute.save()             -- flush the tried list to disk now
+	  getgenv().CodeBrute.progress()         -- where the run is
+	  getgenv().CodeBrute.tried              -- number of codes sent
+	  getgenv().CodeBrute.hits               -- codes that worked
+	  getgenv().CodeBrute.found              -- codes that exist but are dead
+	  getgenv().CodeBrute.maxTried           -- stop here instead of forgetting
+	  getgenv().STOP = true                  -- stop (the original script's flag)
+
+	  getgenv().CodeBrute.clearTried()       -- wipe the tried list on purpose
+
+	------------------------------------------------------------------
+	NOTE ON THE RATE LIMITER
+	------------------------------------------------------------------
+	The original started 200 threads with no rate limit, which asks for
+	several thousand requests per second. The server meters remote
+	traffic per player (refill ~600/s, burst ~6,000) and throttles hard
+	when you exceed it, which makes every request slower. The threads
+	here are gated by a token bucket at 600/s by default, so the run
+	actually goes fast instead of tripping the limiter.
+]]
+
+local Remote = workspace:WaitForChild("__REMOTES"):WaitForChild("Game"):WaitForChild("Twitter")
+
+local G = getgenv()
+
+-- ------------------------------------------------------------- stop old run
+if type(G.CodeBrute) == "table" then
+	G.CodeBrute.running = false
+	task.wait(1.5) -- let the old copy flush its pending writes
+end
+
+-- ---------------------------------------------------------------- settings
+local RATE_DEFAULT = 600 -- requests/second, the server's sustainable refill
+local MAX_TOKENS = 250 -- burst size of the token bucket
+local WORKERS = 200 -- number of worker threads (same as the original)
+local FLUSH_SECS = 1 -- how often the pending codes are written to disk
+local MAX_TRIED = 20000000 -- hard ceiling on the skip set; the run stops
+-- here rather than ever forgetting a code that was already sent
+
+-- ----------------------------------------------------------------- storage
+-- Real's own filesystem, rooted at %LOCALAPPDATA%\Real\workspace.
+-- Absolute paths are rejected by the executor, so everything lives there.
+local HAS_FS = type(writefile) == "function"
+	and type(readfile) == "function"
+	and type(appendfile) == "function"
+
+local STORE_DIR = "codebrute"
+local TRIED_FILE = STORE_DIR .. "/tried.txt"
+local HITS_FILE = STORE_DIR .. "/hits.txt"
+local FOUND_FILE = STORE_DIR .. "/found.txt"
+
+local function fsWrite(path, content)
+	if not HAS_FS then
+		return false
+	end
+	return (pcall(writefile, path, content))
+end
+
+local function fsAppend(path, content)
+	if not HAS_FS then
+		return false
+	end
+	return (pcall(appendfile, path, content))
+end
+
+local function fsRead(path)
+	if not HAS_FS then
+		return nil
+	end
+	local ok, body = pcall(readfile, path)
+	if not ok or type(body) ~= "string" then
+		return nil
+	end
+	return body
+end
+
+local function fsExists(path)
+	if not HAS_FS then
+		return false
+	end
+	if type(isfile) == "function" then
+		local ok, v = pcall(isfile, path)
+		return (ok and v == true)
+	end
+	return fsRead(path) ~= nil
+end
+
+local function fsDelete(path)
+	if not HAS_FS then
+		return false
+	end
+	if type(delfile) == "function" then
+		return (pcall(delfile, path))
+	end
+	return fsWrite(path, "")
+end
+
+-- ----------------------------------------------------------------- runtime
+local CF = {
+	running = true,
+	rate = RATE_DEFAULT,
+	achieved = 0,
+	tried = 0,
+	hits = 0,
+	errors = 0,
+	loaded = 0,
+	state = "running",
+	maxTried = MAX_TRIED,
+	hitsList = {},
+	foundList = {},
+}
+G.CodeBrute = CF
+
+-- the original script's flag is still honoured
+_G.STOP = false
+
+-- ----------------------------------------------------------- the tried list
+-- skip[number] = true for every code that has already been sent.
+-- The key is the numeric value of the 10 digits: "0123456789" and
+-- "1234567890" are different codes and map to different numbers, and two
+-- different 10 digit strings can never share a number.
+local skip = {}
+local skipCount = 0
+
+-- codes an older copy of the script may have kept in RAM only
+local legacySave = _G.save
+
+-- pending codes waiting to be written to disk
+local pending = {}
+local pendingCount = 0
+
+local function markTried(num)
+	if skip[num] then
+		return
+	end
+	skip[num] = true
+	skipCount += 1
+	pending[#pending + 1] = string.format("c%010d", num)
+	pendingCount += 1
+end
+
+-- append everything that was tried since the last flush
+local function flushTried()
+	if pendingCount == 0 or not HAS_FS then
+		pendingCount = 0
+		table.clear(pending)
+		return
+	end
+	fsAppend(TRIED_FILE, table.concat(pending, "\n") .. "\n")
+	table.clear(pending)
+	pendingCount = 0
+end
+
+-- read tried.txt back and put every code in it into the skip set.
+-- returns the number of codes loaded.
+local function loadTried()
+	local n = 0
+	local body = fsRead(TRIED_FILE)
+	if not body then
+		return n
+	end
+	local len = #body
+	local pos = 1
+	while pos <= len do
+		local nl = string.find(body, "\n", pos, true)
+		local line
+		if nl then
+			line = string.sub(body, pos, nl - 1)
+			pos = nl + 1
+		else
+			line = string.sub(body, pos)
+			pos = len + 1
+		end
+		-- lines look like "c0123456789"; a bare "0123456789" is accepted too
+		local first = string.byte(line, 1)
+		local digits = line
+		if first == 99 then -- "c"
+			digits = string.sub(line, 2)
+		end
+		if #digits == 10 then
+			local num = tonumber(digits)
+			if num and not skip[num] then
+				skip[num] = true
+				skipCount += 1
+				n += 1
+			end
+		end
+	end
+	return n
+end
+
+-- adopt a list that is already in memory (an older copy of the original
+-- script keeps its tried codes in _G.save and nothing else). Codes that
+-- are not on disk yet get written to it, so they are not sent again
+-- after a restart.
+local function adoptExisting()
+	if type(legacySave) ~= "table" then
+		return 0
+	end
+	local n = 0
+	for key, value in pairs(legacySave) do
+		local num = nil
+		if type(key) == "number" then
+			num = key
+		elseif type(key) == "string" and string.match(key, "^%d+$") then
+			num = tonumber(key)
+		end
+		if num and not skip[num] then
+			skip[num] = true
+			skipCount += 1
+			pending[#pending + 1] = string.format("c%010d", num)
+			pendingCount += 1
+			n += 1
+		end
+	end
+	return n
+end
+
+-- ---------------------------------------------------------------- utilities
+-- the original script's random 10 digit code, as a number
+local function ranNR()
+	local num = 0
+	for i = 1, 10 do
+		num = num * 10 + (math.random(0, 9))
+	end
+	return num
+end
+
+-- number of codes currently in the skip set
+local function getTotal()
+	return skipCount
+end
+
+-- ------------------------------------------------------------ rate limiter
+local tokens = CF.rate
+local lastRefill = os.clock()
+
+local function takeToken()
+	local now = os.clock()
+	local rate = CF.rate
+	tokens = math.min(MAX_TOKENS, tokens + (now - lastRefill) * rate)
+	lastRefill = now
+	if tokens >= 1 then
+		tokens -= 1
+		return true
+	end
+	return false
+end
+
+-- ------------------------------------------------------------------ control
+-- write the tried list to disk right now
+function CF.save()
+	flushTried()
+	print(string.format(
+		"[CodeBrute] saved: %d codes in memory, %d waiting to be written",
+		skipCount,
+		pendingCount
+	))
+end
+
+-- where the run is right now
+function CF.progress()
+	return string.format(
+		"tried=%d  hits=%d  errors=%d  skipped=%d  %d/s  rate target=%d/s",
+		CF.tried,
+		CF.hits,
+		CF.errors,
+		skipCount,
+		CF.achieved,
+		math.floor(CF.rate)
+	)
+end
+
+-- wipe the tried list (deliberate, this is what makes it retry old codes)
+function CF.clearTried()
+	flushTried()
+	table.clear(pending)
+	pendingCount = 0
+	table.clear(skip)
+	skipCount = 0
+	CF.tried = 0
+	CF.hits = 0
+	CF.hitsList = {}
+	CF.foundList = {}
+	fsDelete(TRIED_FILE)
+	fsDelete(HITS_FILE)
+	fsDelete(FOUND_FILE)
+	print("[CodeBrute] tried list wiped - tried.txt, hits.txt and found.txt deleted")
+end
+
+-- -------------------------------------------------------------------- worker
+local function worker()
+	while CF.running and not _G.STOP do
+		if not takeToken() then
+			task.wait()
+		else
+			-- pick a code that has not been tried yet
+			local NUM = nil
+			local guard = 0
+			repeat
+				NUM = ranNR()
+				guard += 1
+			until skip[NUM] == nil or guard >= 64
+
+			if skip[NUM] ~= nil then
+				-- every candidate was already tried, back off a moment
+				task.wait(0.05)
+			else
+				local code = string.format("c%010d", NUM)
+				local sent = os.clock()
+
+				local ok, v1, v2 = pcall(Remote.InvokeServer, Remote, "Redeem", code)
+
+				CF.tried += 1
+
+				-- the code went out, so it is tried no matter what came back
+				markTried(NUM)
+
+				if not ok then
+					CF.errors += 1
+				else
+					local msg = tostring(v2)
+					if v1 == true then
+						-- a live code, redeemed
+						CF.hits += 1
+						CF.hitsList[#CF.hitsList + 1] = { code = code, msg = msg }
+						fsAppend(HITS_FILE, code .. "\t" .. msg .. "\t" .. tostring(os.time()) .. "\n")
+						print(string.format("[CODE HIT] %s -> %s", code, msg))
+					elseif msg ~= "Code does not exist." then
+						-- the code exists but cannot be redeemed any more
+						CF.foundList[#CF.foundList + 1] = { code = code, msg = msg }
+						fsAppend(FOUND_FILE, code .. "\t" .. msg .. "\t" .. tostring(os.time()) .. "\n")
+						print(string.format("[CODE EXISTS, DEAD] %s -> %s", code, msg))
+					end
+				end
+
+				-- the skip set is never trimmed: at the ceiling the run stops
+				-- instead of forgetting codes that were already sent
+				if skipCount >= CF.maxTried then
+					CF.running = false
+					CF.state = "cap reached"
+					flushTried()
+					print(string.format(
+						"[CodeBrute] STOPPED: the tried list reached maxTried (%d). Nothing was "
+							.. "dropped, so no code will ever be sent twice. Raise "
+							.. "getgenv().CodeBrute.maxTried and restart to keep going.",
+						CF.maxTried
+					))
+				end
+			end
+		end
+	end
+end
+
+-- ------------------------------------------------------------------- saver
+-- the tried list is written to disk in batches, so a crash or a closed
+-- client costs at most one batch of codes
+task.spawn(function()
+	while CF.running and not _G.STOP do
+		task.wait(FLUSH_SECS)
+		flushTried()
+	end
+	flushTried()
+end)
+
+-- ------------------------------------------------------------ stats reporter
+local lastDone, lastT = CF.tried, os.clock()
+task.spawn(function()
+	while CF.running and not _G.STOP do
+		task.wait(10)
+		local now = os.clock()
+		local dt = now - lastT
+		local done = CF.tried
+		CF.achieved = dt > 0 and math.floor((done - lastDone) / dt) or CF.achieved
+		lastDone, lastT = done, now
+		print(string.format(
+			"[CodeBrute] %d/s  tried=%d  hits=%d  errors=%d  skipped=%d",
+			CF.achieved,
+			CF.tried,
+			CF.hits,
+			CF.errors,
+			getTotal()
+		))
+	end
+end)
+
+-- --------------------------------------------------------------------- start
+if HAS_FS then
+	local loaded = loadTried()
+	CF.loaded = loaded
+	if loaded > 0 then
+		print(string.format(
+			"[CodeBrute] loaded %d already-tried codes from %s - they will not be sent again",
+			loaded,
+			TRIED_FILE
+		))
+	end
+
+	-- codes an older copy of the script already tried and kept in RAM only
+	local adopted = adoptExisting()
+	if adopted > 0 then
+		print(string.format(
+			"[CodeBrute] adopted %d codes from the in-memory list of an earlier run - saving them",
+			adopted
+		))
+		flushTried() -- write them to disk right away
+	end
+
+	if loaded == 0 and adopted == 0 then
+		print("[CodeBrute] no tried codes on disk yet - starting from scratch")
+	end
+else
+	print("[CodeBrute] this executor has no file functions - the tried list cannot be saved")
+end
+
+for i = 1, WORKERS do
+	task.spawn(worker)
+end
+
+CF.state = "running"
+print(string.format(
+	"[CodeBrute] started: %d workers, %d/s, %d codes already skipped",
+	WORKERS,
+	RATE_DEFAULT,
+	skipCount
+))
