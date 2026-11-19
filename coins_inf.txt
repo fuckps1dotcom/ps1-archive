@@ -1,0 +1,99 @@
+local HINT = Instance.new('Hint', workspace)
+HINT.Text = 'RETRIEVING COIN DATA'
+
+
+-----\ DETECT NEW SERVER
+
+local OK_TO_PROCEED = false
+
+repeat 
+	local BIND, COINDATA 
+	BIND = workspace.__REMOTES.Game.Coins.OnClientEvent:connect(function(OPER, ARG)
+		if OPER == 'Get' and type(ARG) == 'table' then
+			COINDATA = ARG
+			BIND:Disconnect()
+		end
+	end)
+
+	workspace.__REMOTES.Game.Coins:FireServer("Get")
+	repeat wait() until COINDATA
+
+	local TOTAL_COUNT = 0
+	for i,v in pairs(COINDATA) do
+		TOTAL_COUNT = TOTAL_COUNT + 1
+	end
+
+	if TOTAL_COUNT < 1680 then
+		HINT.Text = 'NEW SERVER DETECTED, WAITING'
+		task.wait(2)
+	else
+		OK_TO_PROCEED = true
+	end
+until OK_TO_PROCEED
+
+-----/
+
+local BIND, COINDATA 
+BIND = workspace.__REMOTES.Game.Coins.OnClientEvent:connect(function(OPER, ARG)
+	if OPER == 'Get' and type(ARG) == 'table' then
+		COINDATA = ARG
+		BIND:Disconnect()
+	end
+end)
+
+workspace.__REMOTES.Game.Coins:FireServer("Get")
+repeat wait() until COINDATA
+
+local TO_INF_COUNT = 0
+for i,v in pairs(COINDATA) do 
+	if v.t~=1e309 then
+		TO_INF_COUNT = TO_INF_COUNT + 1
+	end
+end
+
+HINT.Text = ('0/' .. TO_INF_COUNT)
+
+local PETS = workspace.__REMOTES.Core["Get Stats"]:InvokeServer().Save.Pets
+
+local CURRENT_PET_INDEX = 0
+function GET_NEXT_PET_INDEX()
+	CURRENT_PET_INDEX = CURRENT_PET_INDEX + 1
+	if CURRENT_PET_INDEX == #PETS + 1 then
+		CURRENT_PET_INDEX = 1
+		task.wait(.2)
+	end
+	return CURRENT_PET_INDEX
+end
+
+local TOTAL_INF_COUNT = 0
+for i,v in pairs(COINDATA) do
+	if v.t ~= 1e309 then
+		workspace.__REMOTES.Game.Coins:FireServer('Mine', i, -1e309, PETS[GET_NEXT_PET_INDEX()].id)
+		workspace.__REMOTES.Game.Coins:FireServer('StopMine', i)
+		TOTAL_INF_COUNT = TOTAL_INF_COUNT + 1
+		HINT.Text = TOTAL_INF_COUNT .. '/' .. TO_INF_COUNT
+	end
+end
+
+------\ GET THE REAL DEAL NUMBER !
+
+local BIND, COINDATA 
+BIND = workspace.__REMOTES.Game.Coins.OnClientEvent:connect(function(OPER, ARG)
+	if OPER == 'Get' and type(ARG) == 'table' then
+		COINDATA = ARG
+		BIND:Disconnect()
+	end
+end)
+
+workspace.__REMOTES.Game.Coins:FireServer("Get")
+repeat wait() until COINDATA
+
+
+local REAL_TOTAL_INF_COUNT = 0
+for i,v in pairs(COINDATA) do 
+	if v.t == 1e309 then
+		REAL_TOTAL_INF_COUNT = REAL_TOTAL_INF_COUNT + 1
+	end
+end
+HINT.Text = ('Total INFs: ' .. REAL_TOTAL_INF_COUNT)
+HINT.Text = ('Total INFs: ' .. REAL_TOTAL_INF_COUNT)
