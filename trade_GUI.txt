@@ -1,0 +1,418 @@
+-- Trading Core GUI
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local localplayer = Players.LocalPlayer
+local lastUpdateId = nil
+
+-- Get remote
+local tradingRemote = workspace:WaitForChild("__REMOTES"):WaitForChild("Game"):WaitForChild("Trading")
+
+-- Create main GUI
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "TradingGUI"
+screenGui.ResetOnSpawn = false
+screenGui.Parent = localplayer:WaitForChild("PlayerGui")
+
+-- Create main frame
+local mainFrame = Instance.new("Frame")
+mainFrame.Name = "MainFrame"
+mainFrame.Size = UDim2.new(0, 400, 0, 500)
+mainFrame.Position = UDim2.new(0.5, -200, 0.5, -250)
+mainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
+mainFrame.BackgroundTransparency = 0.1
+mainFrame.BorderSizePixel = 0
+mainFrame.Active = true
+mainFrame.Draggable = true
+mainFrame.Visible = false
+mainFrame.Parent = screenGui
+
+-- Add rounded corners
+local uiCorner = Instance.new("UICorner")
+uiCorner.CornerRadius = UDim.new(0, 8)
+uiCorner.Parent = mainFrame
+
+-- Title bar
+local titleBar = Instance.new("Frame")
+titleBar.Name = "TitleBar"
+titleBar.Size = UDim2.new(1, 0, 0, 40)
+titleBar.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
+titleBar.BorderSizePixel = 0
+titleBar.Parent = mainFrame
+
+local titleCorner = Instance.new("UICorner")
+titleCorner.CornerRadius = UDim.new(0, 8)
+titleCorner.Parent = titleBar
+
+local titleLabel = Instance.new("TextLabel")
+titleLabel.Name = "TitleLabel"
+titleLabel.Size = UDim2.new(1, -40, 1, 0)
+titleLabel.Position = UDim2.new(0, 10, 0, 0)
+titleLabel.BackgroundTransparency = 1
+titleLabel.Text = "Trading System"
+titleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+titleLabel.TextXAlignment = Enum.TextXAlignment.Left
+titleLabel.Font = Enum.Font.GothamBold
+titleLabel.TextSize = 18
+titleLabel.Parent = titleBar
+
+local closeButton = Instance.new("TextButton")
+closeButton.Name = "CloseButton"
+closeButton.Size = UDim2.new(0, 30, 0, 30)
+closeButton.Position = UDim2.new(1, -35, 0.5, -15)
+closeButton.BackgroundColor3 = Color3.fromRGB(255, 70, 70)
+closeButton.Text = "X"
+closeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+closeButton.Font = Enum.Font.GothamBold
+closeButton.TextSize = 16
+closeButton.Parent = titleBar
+
+local closeCorner = Instance.new("UICorner")
+closeCorner.CornerRadius = UDim.new(0, 6)
+closeCorner.Parent = closeButton
+
+-- Player list section
+local playerListFrame = Instance.new("Frame")
+playerListFrame.Name = "PlayerListFrame"
+playerListFrame.Size = UDim2.new(1, -20, 0, 150)
+playerListFrame.Position = UDim2.new(0, 10, 0, 50)
+playerListFrame.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
+playerListFrame.BackgroundTransparency = 0.3
+playerListFrame.BorderSizePixel = 0
+playerListFrame.Parent = mainFrame
+
+local listCorner = Instance.new("UICorner")
+listCorner.CornerRadius = UDim.new(0, 6)
+listCorner.Parent = playerListFrame
+
+local listLabel = Instance.new("TextLabel")
+listLabel.Size = UDim2.new(1, -10, 0, 30)
+listLabel.Position = UDim2.new(0, 5, 0, 0)
+listLabel.BackgroundTransparency = 1
+listLabel.Text = "Online Players"
+listLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+listLabel.TextXAlignment = Enum.TextXAlignment.Left
+listLabel.Font = Enum.Font.Gotham
+listLabel.TextSize = 14
+listLabel.Parent = playerListFrame
+
+-- Scrolling frame for players
+local playerScrollingFrame = Instance.new("ScrollingFrame")
+playerScrollingFrame.Name = "PlayerScrollingFrame"
+playerScrollingFrame.Size = UDim2.new(1, -10, 1, -40)
+playerScrollingFrame.Position = UDim2.new(0, 5, 0, 30)
+playerScrollingFrame.BackgroundTransparency = 1
+playerScrollingFrame.BorderSizePixel = 0
+playerScrollingFrame.ScrollBarThickness = 6
+playerScrollingFrame.ScrollBarImageColor3 = Color3.fromRGB(100, 100, 100)
+playerScrollingFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
+playerScrollingFrame.AutomaticCanvasSize = Enum.AutomaticSize.Y
+playerScrollingFrame.Parent = playerListFrame
+
+local playerListLayout = Instance.new("UIListLayout")
+playerListLayout.Padding = UDim.new(0, 4)
+playerListLayout.Parent = playerScrollingFrame
+
+-- Trade info section
+local tradeInfoFrame = Instance.new("Frame")
+tradeInfoFrame.Name = "TradeInfoFrame"
+tradeInfoFrame.Size = UDim2.new(1, -20, 0, 100)
+tradeInfoFrame.Position = UDim2.new(0, 10, 0, 210)
+tradeInfoFrame.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
+tradeInfoFrame.BackgroundTransparency = 0.3
+tradeInfoFrame.BorderSizePixel = 0
+tradeInfoFrame.Parent = mainFrame
+
+local infoCorner = Instance.new("UICorner")
+infoCorner.CornerRadius = UDim.new(0, 6)
+infoCorner.Parent = tradeInfoFrame
+
+local tradeIdLabel = Instance.new("TextLabel")
+tradeIdLabel.Name = "TradeIdLabel"
+tradeIdLabel.Size = UDim2.new(1, -10, 0.5, -5)
+tradeIdLabel.Position = UDim2.new(0, 5, 0, 5)
+tradeIdLabel.BackgroundTransparency = 1
+tradeIdLabel.Text = "Current Trade ID: None"
+tradeIdLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+tradeIdLabel.TextXAlignment = Enum.TextXAlignment.Left
+tradeIdLabel.Font = Enum.Font.Gotham
+tradeIdLabel.TextSize = 14
+tradeIdLabel.Parent = tradeInfoFrame
+
+local tradeStatusLabel = Instance.new("TextLabel")
+tradeStatusLabel.Name = "TradeStatusLabel"
+tradeStatusLabel.Size = UDim2.new(1, -10, 0.5, -5)
+tradeStatusLabel.Position = UDim2.new(0, 5, 0.5, 5)
+tradeStatusLabel.BackgroundTransparency = 1
+tradeStatusLabel.Text = "Status: No active trade"
+tradeStatusLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+tradeStatusLabel.TextXAlignment = Enum.TextXAlignment.Left
+tradeStatusLabel.Font = Enum.Font.Gotham
+tradeStatusLabel.TextSize = 14
+tradeStatusLabel.Parent = tradeInfoFrame
+
+-- Action buttons
+local buttonFrame = Instance.new("Frame")
+buttonFrame.Name = "ButtonFrame"
+buttonFrame.Size = UDim2.new(1, -20, 0, 80)
+buttonFrame.Position = UDim2.new(0, 10, 0, 320)
+buttonFrame.BackgroundTransparency = 1
+buttonFrame.Parent = mainFrame
+
+-- Trade button
+local tradeButton = Instance.new("TextButton")
+tradeButton.Name = "TradeButton"
+tradeButton.Size = UDim2.new(0.5, -5, 0, 35)
+tradeButton.Position = UDim2.new(0, 0, 0, 0)
+tradeButton.BackgroundColor3 = Color3.fromRGB(50, 150, 255)
+tradeButton.Text = "Trade Selected"
+tradeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+tradeButton.Font = Enum.Font.GothamBold
+tradeButton.TextSize = 16
+tradeButton.Parent = buttonFrame
+
+local tradeCorner = Instance.new("UICorner")
+tradeCorner.CornerRadius = UDim.new(0, 6)
+tradeCorner.Parent = tradeButton
+
+-- Accept button
+local acceptButton = Instance.new("TextButton")
+acceptButton.Name = "AcceptButton"
+acceptButton.Size = UDim2.new(0.5, -5, 0, 35)
+acceptButton.Position = UDim2.new(0.5, 5, 0, 0)
+acceptButton.BackgroundColor3 = Color3.fromRGB(50, 200, 100)
+acceptButton.Text = "Accept / Ready"
+acceptButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+acceptButton.Font = Enum.Font.GothamBold
+acceptButton.TextSize = 16
+acceptButton.Parent = buttonFrame
+
+local acceptCorner = Instance.new("UICorner")
+acceptCorner.CornerRadius = UDim.new(0, 6)
+acceptCorner.Parent = acceptButton
+
+-- Cancel button
+local cancelButton = Instance.new("TextButton")
+cancelButton.Name = "CancelButton"
+cancelButton.Size = UDim2.new(1, 0, 0, 35)
+cancelButton.Position = UDim2.new(0, 0, 0, 40)
+cancelButton.BackgroundColor3 = Color3.fromRGB(255, 80, 80)
+cancelButton.Text = "Cancel Trade"
+cancelButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+cancelButton.Font = Enum.Font.GothamBold
+cancelButton.TextSize = 16
+cancelButton.Parent = buttonFrame
+
+local cancelCorner = Instance.new("UICorner")
+cancelCorner.CornerRadius = UDim.new(0, 6)
+cancelCorner.Parent = cancelButton
+
+-- Toggle button (floating)
+local toggleButton = Instance.new("TextButton")
+toggleButton.Name = "ToggleButton"
+toggleButton.Size = UDim2.new(0, 50, 0, 50)
+toggleButton.Position = UDim2.new(0, 20, 0.5, -25)
+toggleButton.BackgroundColor3 = Color3.fromRGB(50, 150, 255)
+toggleButton.Text = "💰"
+toggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+toggleButton.Font = Enum.Font.GothamBold
+toggleButton.TextSize = 24
+toggleButton.Draggable = true
+toggleButton.Parent = screenGui
+
+local toggleCorner = Instance.new("UICorner")
+toggleCorner.CornerRadius = UDim.new(1, 0)
+toggleCorner.Parent = toggleButton
+
+-- Variables
+local selectedPlayer = nil
+local playerButtons = {}
+
+-- Functions
+local function updatePlayerList()
+    -- Clear existing buttons
+    for _, button in pairs(playerButtons) do
+        button:Destroy()
+    end
+    playerButtons = {}
+    
+    -- Create buttons for each player
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= localplayer then
+            local button = Instance.new("TextButton")
+            button.Name = player.Name
+            button.Size = UDim2.new(1, 0, 0, 30)
+            button.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
+            button.BackgroundTransparency = 0.3
+            button.Text = player.Name .. " (Level: ?)"
+            button.TextColor3 = Color3.fromRGB(255, 255, 255)
+            button.TextXAlignment = Enum.TextXAlignment.Left
+            button.Font = Enum.Font.Gotham
+            button.TextSize = 14
+            button.Parent = playerScrollingFrame
+            
+            local buttonCorner = Instance.new("UICorner")
+            buttonCorner.CornerRadius = UDim.new(0, 4)
+            buttonCorner.Parent = button
+            
+            -- Hover effect
+            button.MouseEnter:Connect(function()
+                if selectedPlayer ~= player then
+                    button.BackgroundColor3 = Color3.fromRGB(55, 55, 65)
+                end
+            end)
+            
+            button.MouseLeave:Connect(function()
+                if selectedPlayer ~= player then
+                    button.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
+                end
+            end)
+            
+            -- Selection
+            button.MouseButton1Click:Connect(function()
+                -- Reset previous selection
+                if selectedPlayer and playerButtons[selectedPlayer] then
+                    playerButtons[selectedPlayer].BackgroundColor3 = Color3.fromRGB(45, 45, 55)
+                end
+                
+                -- Select new player
+                selectedPlayer = player
+                button.BackgroundColor3 = Color3.fromRGB(50, 150, 255)
+                tradeButton.Text = "Trade " .. player.Name
+            end)
+            
+            playerButtons[player] = button
+        end
+    end
+end
+
+local function showNotification(message, isError)
+    local notification = Instance.new("Frame")
+    notification.Size = UDim2.new(0, 300, 0, 50)
+    notification.Position = UDim2.new(0.5, -150, 0, 50)
+    notification.BackgroundColor3 = isError and Color3.fromRGB(255, 80, 80) or Color3.fromRGB(50, 200, 100)
+    notification.BackgroundTransparency = 0.2
+    notification.Parent = screenGui
+    
+    local notifCorner = Instance.new("UICorner")
+    notifCorner.CornerRadius = UDim.new(0, 8)
+    notifCorner.Parent = notification
+    
+    local notifText = Instance.new("TextLabel")
+    notifText.Size = UDim2.new(1, -20, 1, 0)
+    notifText.Position = UDim2.new(0, 10, 0, 0)
+    notifText.BackgroundTransparency = 1
+    notifText.Text = message
+    notifText.TextColor3 = Color3.fromRGB(255, 255, 255)
+    notifText.TextWrapped = true
+    notifText.Font = Enum.Font.Gotham
+    notifText.TextSize = 14
+    notifText.Parent = notification
+    
+    -- Animate and destroy
+    local tweenInfo = TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+    local goal = {Position = UDim2.new(0.5, -150, 0, 50)}
+    local fadeOut = TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+    local fadeGoal = {Position = UDim2.new(0.5, -150, 0, -50)}
+    
+    task.wait(2)
+    local fadeTween = TweenService:Create(notification, fadeOut, fadeGoal)
+    fadeTween:Play()
+    fadeTween.Completed:Connect(function()
+        notification:Destroy()
+    end)
+end
+
+-- Connect to trade updates
+game:FindFirstChild('Trade Update', true).OnClientEvent:Connect(function(id)
+    lastUpdateId = id
+    tradeIdLabel.Text = "Current Trade ID: " .. tostring(id)
+    tradeStatusLabel.Text = "Status: Trade pending"
+    showNotification("New trade request received!", false)
+end)
+
+-- Button functionality
+tradeButton.MouseButton1Click:Connect(function()
+    if selectedPlayer then
+        task.spawn(function()
+            repeat 
+                task.wait(.25) 
+            until tradingRemote:InvokeServer("InvSend", selectedPlayer) == true
+        end)
+        showNotification("Trade request sent to " .. selectedPlayer.Name, false)
+    else
+        showNotification("Please select a player first!", true)
+    end
+end)
+
+acceptButton.MouseButton1Click:Connect(function()
+    if lastUpdateId then
+        local success, err = pcall(function()
+            tradingRemote:InvokeServer("Ready", lastUpdateId)
+        end)
+        if success then 
+            showNotification("Trade accepted: " .. lastUpdateId, false)
+            tradeStatusLabel.Text = "Status: Trade accepted"
+        else
+            showNotification("Failed to accept trade!", true)
+        end
+    else
+        showNotification("No active trade to accept!", true)
+    end
+end)
+
+cancelButton.MouseButton1Click:Connect(function()
+    if lastUpdateId then
+        local success, err = pcall(function()
+            tradingRemote:InvokeServer("Cancel", lastUpdateId)
+        end)
+        if success then 
+            showNotification("Trade cancelled", false)
+            tradeIdLabel.Text = "Current Trade ID: None"
+            tradeStatusLabel.Text = "Status: No active trade"
+            lastUpdateId = nil
+        else
+            showNotification("Failed to cancel trade!", true)
+        end
+    else
+        showNotification("No active trade to cancel!", true)
+    end
+end)
+
+-- Toggle GUI
+toggleButton.MouseButton1Click:Connect(function()
+    mainFrame.Visible = not mainFrame.Visible
+    if mainFrame.Visible then
+        toggleButton.Text = "❌"
+        updatePlayerList()
+    else
+        toggleButton.Text = "💰"
+    end
+end)
+
+closeButton.MouseButton1Click:Connect(function()
+    mainFrame.Visible = false
+    toggleButton.Text = "💰"
+end)
+
+-- Update player list when players join/leave
+Players.PlayerAdded:Connect(updatePlayerList)
+Players.PlayerRemoving:Connect(updatePlayerList)
+
+-- Initial update
+updatePlayerList()
+
+-- Keyboard shortcut (LeftAlt + T)
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if not gameProcessed and input.KeyCode == Enum.KeyCode.T and UserInputService:IsKeyDown(Enum.KeyCode.LeftAlt) then
+        mainFrame.Visible = not mainFrame.Visible
+        if mainFrame.Visible then
+            toggleButton.Text = "❌"
+            updatePlayerList()
+        else
+            toggleButton.Text = "💰"
+        end
+    end
+end)
+
+print("Trading GUI loaded! Click the 💰 button or press LeftAlt + T to open")
