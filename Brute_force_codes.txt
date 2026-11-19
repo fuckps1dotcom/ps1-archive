@@ -1,0 +1,56 @@
+_G.save = _G.save or {}
+_G.STOP = false
+
+local r = workspace:WaitForChild("__REMOTES"):WaitForChild("Game"):WaitForChild("Twitter")
+
+local lastTOTAL = 0
+
+function ranNR()
+	local x = ''
+	for i = 1, 10 do
+		x = x .. tostring(math.random(1,10) - 1)
+	end
+	return x
+end
+
+function getTotal()
+	if math.random((lastTOTAL / 100) + 1) == 1 then
+		local x = 0
+		for i, _ in pairs(_G.save) do
+			x = x + 1
+		end
+		lastTOTAL = x
+	end
+
+	return lastTOTAL
+end
+
+
+for _ = 1, 200 do
+
+task.spawn(function()
+
+while task.wait() and not _G.STOP do
+	local NUM = nil
+
+	repeat NUM = ranNR() until not _G.save[NUM]
+
+	local v1, v2 = r:InvokeServer("Redeem", "c" .. NUM)
+	print('[' .. getTotal() .. '] c' .. NUM, v1, v2)
+	if v1 == 'false' then v1='f' end
+	if v2 == 'Code does not exist.' then v2 = 'NE' end 
+	if v1 == 'f' and v2 == 'NE' then
+		_G.save[NUM] = 0
+	else
+		_G.save[NUM] = tostring(v1) .. ','.. tostring(v2)
+	end
+end
+
+end)
+
+end
+
+local h = Instance.new("Hint", workspace)
+h.Text = 'STOP detected.. exiting..'
+wait(3)
+h:Destroy()
