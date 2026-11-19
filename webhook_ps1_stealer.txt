@@ -1,0 +1,250 @@
+local Players = game:GetService("Players")
+local HttpService = game:GetService("HttpService")
+local TeleportService = game:GetService("TeleportService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local VirtualUser = game:GetService("VirtualUser")
+
+--// WEBHOOK CONFIG
+local WEBHOOK_URL = ""
+local TAG_ROLE_ID = ""
+local WEBHOOK_PING = "<@&"..TAG_ROLE_ID..">"
+
+--// IMAGES
+local PET_IMAGES = {
+    Glitched = "https://cdn.discordapp.com/attachments/1338178435322740839/1403820614585683989/file_0000000090b8620a9c59039caa6a8f1e_1.png",
+    HugeCat  = "https://cdn.discordapp.com/attachments/1492429294553792583/1497604295988875345/Untitled49_20250717163448.png",
+    Pet90009 = "https://cdn.discordapp.com/attachments/1338178435322740839/1403820614585683989/file_0000000090b8620a9c59039caa6a8f1e_1.png"
+}
+
+--// COLORS
+local PET_COLORS = {
+    Glitched = 0x00FFFF,
+    HugeCat  = 0xFFD700,
+    Pet90009 = 0xFF00FF
+}
+
+--// SETTINGS
+local sentPets = {}
+
+--// SERVER HOP SETTINGS
+local HOP_MIN_PLAYERS = 4          -- only hop to servers with at least this many players
+local HOP_INTERVAL = 10            -- seconds between hops (only hops if nobody found)
+local MAX_HOP_ATTEMPTS = 3         -- retry failed server lookups
+local HOP_COOLDOWN = 5             -- wait after finding someone before hopping
+local currentJobId = game.JobId
+
+--// BLACKLIST
+local PLAYER_BLACKLIST = {
+    ["1krnll"] = true,
+    ["LiisaPetSimulator"] = true,
+    ["lucas1524868"] = true,
+    ["SuperBird3221"] = true,
+    ["XxxsakalamXxx12"] = true
+}
+
+--// KNOWN GLITCHED PETS TO IGNORE (only report NEW ones)
+local excludedGlitchPets = {
+    ["Dominus Huge"] = true,
+    ["Hydra"] = true,
+    ["Chimera"] = true,
+    ["Aesthetic Cat"] = true,
+    ["Magic Fox"] = true,
+    ["Spike"] = true,
+    ["Dominus Pumpkin"] = true
+}
+
+--// UTIL
+local function formatNumber(n)
+    return tostring(n):reverse():gsub("%d%d%d","%1,"):reverse():gsub("^,","")
+end
+
+--// WEBHOOK
+local function sendWebhook(playerName, userId, petLevel, petType, petName, maxLevel, detectionType)
+    if PLAYER_BLACKLIST[playerName] then return end
+
+    local key = playerName.."_"..petName.."_"..petLevel.."_"..detectionType
+    if sentPets[key] then return end
+    sentPets[key] = true
+
+    local image = PET_IMAGES[petType] or PET_IMAGES["Glitched"]
+    local color = PET_COLORS[petType] or 0x2b2d31
+
+    local joinScript = "game:GetService(\"TeleportService\"):TeleportToPlaceInstance(" .. game.PlaceId .. ", \"" .. game.JobId .. "\", game:GetService(\"Players\").LocalPlayer)"
+
+    local embed = {
+        title = "✨ Pet Found!",
+        description = "**"..petType.." "..petName.."** detected",
+        color = color,
+        author = {
+            name = playerName,
+            icon_url = "https://www.roblox.com/headshot-thumbnail/image?userId=" .. userId .. "&width=420&height=420&format=png"
+        },
+        thumbnail = { url = image },
+        fields = {
+            { name = "👤 User", value = playerName.." ("..userId..")", inline = false },
+            { name = "📊 Stats", value = "Level: **"..formatNumber(petLevel).."**\nMax: **"..formatNumber(maxLevel).."**", inline = true },
+            { name = "🔎 Type", value = detectionType, inline = true },
+            { name = "📜 Join Script", value = joinScript, inline = false },
+            { name = "👤 Profile", value = "https://www.roblox.com/users/"..userId.."/profile", inline = false }
+        },
+        image = { url = image },
+        footer = { text = "Delta • "..os.date("%d/%m/%Y %X") },
+        timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
+    }
+
+    pcall(function()
+        HttpService:PostAsync(
+            WEBHOOK_URL,
+            HttpService:JSONEncode({ content = WEBHOOK_PING, embeds = {embed} }),
+            Enum.HttpContentType.ApplicationJson
+        )
+    end)
+end
+
+--// SERVER HOP: get a full/large server
+local function getFullServer()
+    -- Try the public API first (works if HTTP requests are enabled / from executor)
+    for attempt = 1, MAX_HOP_ATTEMPTS do
+        local ok, res = pcall(function()
+            return HttpService:JSONDecode(
+                game:HttpGet(
+                    "https://games.roblox.com/v1/games/"..game.PlaceId.."/servers/Public?sortOrder=Desc&limit=100&excludeFullGames=true"
+                )
+            )
+        end)
+
+        if ok and res and res.data then
+            local candidates = {}
+            for _, srv in ipairs(res.data) do
+                if srv.id ~= currentJobId and srv.playing and srv.playing >= HOP_MIN_PLAYERS and srv.maxPlayers and srv.playing < srv.maxPlayers then
+                    table.insert(candidates, srv)
+                end
+            end
+
+            if #candidates > 0 then
+                table.sort(candidates, function(a, b) return a.playing > b.playing end)
+                -- pick a random one among the top 5 largest
+                local topN = math.min(5, #candidates)
+                return candidates[math.random(1, topN)]
+            end
+        end
+        task.wait(2)
+    end
+    return nil
+end
+
+local function serverHop(reason)
+    reason = reason or "No players found"
+    local srv = getFullServer()
+    if srv then
+        pcall(function()
+            TeleportService:TeleportToPlaceInstance(game.PlaceId, srv.id, Players.LocalPlayer)
+        end)
+    else
+        -- fallback: random public server
+        pcall(function()
+            TeleportService:Teleport(game.PlaceId, Players.LocalPlayer)
+        end)
+    end
+end
+
+--// Rejoin the same server (used when kicked)
+local function rejoin()
+    pcall(function()
+        TeleportService:TeleportToPlaceInstance(game.PlaceId, currentJobId, Players.LocalPlayer)
+    end)
+end
+
+--// Anti-kick: if disconnected, try to rejoin / hop
+game:GetService("Players").PlayerRemoving:Connect(function(plr)
+    if plr == Players.LocalPlayer then
+        task.wait(2)
+        rejoin()
+    end
+end)
+
+--// Keep alive: prevent idle kick from Roblox (works in many executors)
+Players.LocalPlayer.Idled:Connect(function()
+    pcall(function()
+        VirtualUser:CaptureController()
+        VirtualUser:ClickButton2(Vector2.new())
+    end)
+end)
+
+--// LOOP
+local lastHop = tick()
+
+while true do
+    local foundSomething = false
+
+    pcall(function()
+        local dirModule = ReplicatedStorage:FindFirstChild("1 | Directory")
+        if not dirModule then return end
+
+        local directory = require(dirModule).Pets
+        local remote = workspace.__REMOTES and workspace.__REMOTES.Core and workspace.__REMOTES.Core:FindFirstChild("Get Other Stats")
+        if not remote then return end
+
+        local success, stats = pcall(function()
+            return remote:InvokeServer()
+        end)
+
+        if not success or not stats then return end
+
+        for playerName, data in pairs(stats) do
+            if PLAYER_BLACKLIST[playerName] then continue end
+
+            local pets = data and data.Save and data.Save.Pets
+            local plr = Players:FindFirstChild(playerName)
+            local userId = plr and plr.UserId or 0
+
+            if pets then
+                for _, pet in pairs(pets) do
+                    if type(pet) ~= "table" or not pet.n or not pet.l then continue end
+
+                    local petName = (directory[pet.n] and directory[pet.n].DisplayName) or tostring(pet.n)
+
+                    local baseMax = directory[pet.n] and directory[pet.n].Level and directory[pet.n].Level[2] or 0
+                    local multi = (pet.g and 3) or (pet.r and 6) or (pet.dm and 18) or 1
+                    local maxLevel = baseMax * multi
+
+                    --// Pet 90009 (the one right before Huge Cat / Huge)
+                    if tostring(pet.n) == "90009" then
+                        sendWebhook(playerName, userId, pet.l, "Pet90009", petName, maxLevel, "Pet 90009")
+                        foundSomething = true
+                        continue
+                    end
+
+                    --// Huge Cat
+                    if petName == "Huge Cat" then
+                        sendWebhook(playerName, userId, pet.l, "HugeCat", petName, maxLevel, "Huge Cat")
+                        foundSomething = true
+                        continue
+                    end
+
+                    --// Glitched (only new ones)
+                    local isGlitched = (pet.r and pet.dm) or (pet.dm and pet.gl)
+                    if isGlitched then
+                        if excludedGlitchPets[petName] then continue end
+                        sendWebhook(playerName, userId, pet.l, "Glitched", petName, maxLevel, "New Glitched")
+                        foundSomething = true
+                    end
+                end
+            end
+        end
+    end)
+
+    -- If something found, wait a bit then hop (so you can join / see webhook)
+    if foundSomething then
+        task.wait(HOP_COOLDOWN)
+    end
+
+    -- Server hop on interval
+    if tick() - lastHop >= HOP_INTERVAL then
+        lastHop = tick()
+        serverHop()
+        task.wait(2)
+    else
+        task.wait(10)
+    end
+end
