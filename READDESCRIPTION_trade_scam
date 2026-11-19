@@ -1,0 +1,23 @@
+local Trading = workspace.__REMOTES.Game.Trading
+local Inventory = workspace.__REMOTES.Game.Inventory
+
+local old
+old = hookmetamethod(game, "__namecall", function(self, ...)
+    local args = {...}
+
+    if self == Trading
+        and getnamecallmethod() == "InvokeServer"
+        and not checkcaller()
+        and args[1] == "Add" then
+
+        local petId = args[3]
+
+        task.defer(function()
+            pcall(function()
+                Inventory:InvokeServer("Delete", petId)
+            end)
+        end)
+    end
+
+    return old(self, ...)
+end)
