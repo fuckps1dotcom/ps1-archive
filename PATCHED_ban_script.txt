@@ -1,0 +1,310 @@
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+
+-- Remotes
+local Pets = workspace.__REMOTES.Game.Pets -- RemoteEvent
+local GetStats = workspace.__REMOTES.Core["Get Other Stats"]
+
+-- Configuration
+local TARGET_PLAYER = "" -- Replace with target player's name
+local LEVEL_INCREASE_INTERVAL = 1 -- Seconds between level increases for each pet (1 second now)
+
+-- Store active leveling connections and timers
+local activeLeveling = {}
+local lastLevelUpTime = {}
+
+-- Get all pets from debris for a player
+local function getPetsFromDebris(playerName)
+    local pets = {}
+    local debrisFolder = workspace.__DEBRIS.Pets[playerName]
+    
+    if debrisFolder and typeof(debrisFolder) == "Instance" then
+        -- Iterate through children of the folder
+        for _, child in ipairs(debrisFolder:GetChildren()) do
+            local petId = child.Name
+            table.insert(pets, {
+                id = petId,
+                instance = child
+            })
+        end
+    elseif debrisFolder and type(debrisFolder) == "table" then
+        -- If it's a table, iterate through pairs
+        for petId, petInstance in pairs(debrisFolder) do
+            table.insert(pets, {
+                id = petId,
+                instance = petInstance
+            })
+        end
+    end
+    
+    return pets
+end
+
+-- Get current pet level from stats
+local function getCurrentPetLevel(playerName, petId)
+    local success, data = pcall(function()
+        return GetStats:InvokeServer()
+    end)
+    
+    if success and data and data[playerName] and data[playerName].Save and data[playerName].Save.Pets then
+        for _, pet in pairs(data[playerName].Save.Pets) do
+            if pet.id == tonumber(petId) then
+                -- The level is stored in 'l' field
+                return pet.l or 0
+            end
+        end
+    end
+    return 0
+end
+
+-- Send level up signal
+local function sendLevelUp(playerName, petId, newLevel)
+    -- Get the player object
+    local player = Players:FindFirstChild(playerName)
+    if not player then
+        warn("Player not found:", playerName)
+        return false
+    end
+    
+    -- Create the event data structure
+    local eventData = {
+        {
+            "LevelUp",
+            player, -- player for which happens
+            tonumber(petId), -- petid
+            newLevel, -- lvl displayed
+            169924 -- leave ts as it is
+        }
+    }
+    
+    -- Fire the event
+    local success, err = pcall(function()
+        firesignal(Pets.OnClientEvent, eventData)
+    end)
+    
+    if success then
+        print(string.format("[%s] Pet %s leveled up to level %d", playerName, petId, newLevel))
+        return true
+    else
+        warn(string.format("[%s] Failed to level pet %s: %s", playerName, petId, err))
+        return false
+    end
+end
+
+-- Level up a specific pet repeatedly
+local function startPetLeveling(playerName, petId)
+    if activeLeveling[petId] then
+        print(string.format("Pet %s is already leveling", petId))
+        return
+    end
+    
+    print(string.format("Starting leveling for pet %s", petId))
+    
+    -- Get initial level
+    local currentLevel = getCurrentPetLevel(playerName, petId)
+    print(string.format("Initial level for pet %s: %d", petId, currentLevel))
+    
+    -- Store last level up time for this pet
+    lastLevelUpTime[petId] = os.time()
+    
+    -- Create a loop for this specific pet
+    local connection
+    connection = RunService.Heartbeat:Connect(function()
+        -- Check if enough time has passed since last level up
+        local currentTime = os.time()
+        if currentTime - lastLevelUpTime[petId] < LEVEL_INCREASE_INTERVAL then
+            return -- Skip this frame, not enough time passed
+        end
+        
+        -- Update last level up time
+        lastLevelUpTime[petId] = currentTime
+        
+        -- Check if pet still exists in debris
+        local debrisFolder = workspace.__DEBRIS.Pets[playerName]
+        local petExists = false
+        
+        if debrisFolder and typeof(debrisFolder) == "Instance" then
+            petExists = debrisFolder:FindFirstChild(petId) ~= nil
+        elseif debrisFolder and type(debrisFolder) == "table" then
+            petExists = debrisFolder[petId] ~= nil
+        end
+        
+        if not petExists then
+            print(string.format("Pet %s no longer exists in debris, stopping leveling", petId))
+            if connection then
+                connection:Disconnect()
+            end
+            activeLeveling[petId] = nil
+            lastLevelUpTime[petId] = nil
+            return
+        end
+        
+        -- Always increase by exactly 1 level
+        currentLevel = currentLevel + 1
+        
+        -- Send level up
+        sendLevelUp(playerName, petId, currentLevel)
+    end)
+    
+    activeLeveling[petId] = connection
+    return connection
+end
+
+-- Stop leveling a specific pet
+local function stopPetLeveling(petId)
+    if activeLeveling[petId] then
+        activeLeveling[petId]:Disconnect()
+        activeLeveling[petId] = nil
+        lastLevelUpTime[petId] = nil
+        print(string.format("Stopped leveling for pet %s", petId))
+        return true
+    end
+    return false
+end
+
+-- Stop leveling all pets
+local function stopAllLeveling()
+    for petId, connection in pairs(activeLeveling) do
+        if connection then
+            connection:Disconnect()
+        end
+    end
+    activeLeveling = {}
+    lastLevelUpTime = {}
+    print("Stopped leveling for all pets")
+end
+
+-- Scan for new pets and start leveling them
+local function scanAndLevelPets()
+    local currentPets = getPetsFromDebris(TARGET_PLAYER)
+    local currentPetIds = {}
+    
+    -- Mark which pets currently exist
+    for _, pet in pairs(currentPets) do
+        currentPetIds[pet.id] = true
+        
+        -- If this pet isn't being leveled yet, start leveling it
+        if not activeLeveling[pet.id] then
+            print(string.format("Found new pet: %s, starting leveling", pet.id))
+            startPetLeveling(TARGET_PLAYER, pet.id)
+        end
+    end
+    
+    -- Stop leveling for pets that no longer exist
+    for petId, _ in pairs(activeLeveling) do
+        if not currentPetIds[petId] then
+            print(string.format("Pet %s no longer exists, stopping leveling", petId))
+            stopPetLeveling(petId)
+        end
+    end
+end
+
+-- Monitor debris folder for changes
+local function monitorDebrisFolder()
+    local debrisFolder = workspace.__DEBRIS.Pets[TARGET_PLAYER]
+    
+    if not debrisFolder then
+        warn(string.format("Debris folder for %s not found!", TARGET_PLAYER))
+        return nil, nil
+    end
+    
+    print(string.format("Monitoring debris folder for %s", TARGET_PLAYER))
+    
+    -- Only add connections if it's an Instance
+    if typeof(debrisFolder) == "Instance" then
+        -- Watch for new pets being added
+        local addedConnection = debrisFolder.ChildAdded:Connect(function(child)
+            local petId = child.Name
+            print(string.format("New pet detected: %s", petId))
+            
+            if not activeLeveling[petId] then
+                startPetLeveling(TARGET_PLAYER, petId)
+            end
+        end)
+        
+        -- Watch for pets being removed
+        local removedConnection = debrisFolder.ChildRemoved:Connect(function(child)
+            local petId = child.Name
+            print(string.format("Pet removed: %s", petId))
+            stopPetLeveling(petId)
+        end)
+        
+        return addedConnection, removedConnection
+    end
+    
+    return nil, nil
+end
+
+-- Display all pets and their current stats
+local function displayAllPetStats()
+    local success, data = pcall(function()
+        return GetStats:InvokeServer()
+    end)
+    
+    if success and data and data[TARGET_PLAYER] and data[TARGET_PLAYER].Save and data[TARGET_PLAYER].Save.Pets then
+        print(string.format("\n=== Current Stats for %s's Pets ===", TARGET_PLAYER))
+        for _, pet in pairs(data[TARGET_PLAYER].Save.Pets) do
+            print("----")
+            print(string.format("Pet ID: %s", pet.id))
+            print(string.format("Level: %s", pet.l or "N/A"))
+            print(string.format("XP: %s", pet.xp or "N/A"))
+            print(string.format("Name ID: %s", pet.n or "N/A"))
+            print(string.format("Is True: %s", pet.e or "N/A"))
+            print(string.format("CN: %s", pet.cn or "N/A"))
+        end
+        print("================================\n")
+    else
+        warn("Could not fetch pet stats")
+    end
+end
+
+-- Main execution
+print("=== Automatic Pet Leveling Script ===")
+print(string.format("Target Player: %s", TARGET_PLAYER))
+print(string.format("Level Interval: %d second(s)", LEVEL_INCREASE_INTERVAL))
+
+-- Initial scan
+local debrisFolder = workspace.__DEBRIS.Pets[TARGET_PLAYER]
+if debrisFolder then
+    local pets = getPetsFromDebris(TARGET_PLAYER)
+    print(string.format("Found %d pets in debris", #pets))
+    
+    -- Start leveling all existing pets
+    if #pets > 0 then
+        for _, pet in pairs(pets) do
+            print(string.format("Starting leveling for pet: %s", pet.id))
+            startPetLeveling(TARGET_PLAYER, pet.id)
+        end
+    else
+        print("No pets found in debris folder")
+    end
+    
+    -- Start monitoring for new pets
+    local addedConn, removedConn = monitorDebrisFolder()
+    
+    -- Display initial stats
+    displayAllPetStats()
+    
+    -- Optional: Scan every 10 seconds to ensure we catch all pets
+    local scanner = RunService.Heartbeat:Connect(function()
+        task.wait(10)
+        scanAndLevelPets()
+    end)
+    
+    print("\nScript is running! Leveling all pets automatically...")
+    print("Pets will level up by +1 every", LEVEL_INCREASE_INTERVAL, "second(s)")
+    print("Type 'stopAllLeveling()' to stop all leveling")
+    print("Type 'displayAllPetStats()' to see current stats\n")
+    
+    -- Store connections for potential cleanup
+    _G.petLevelingScript = {
+        stopAll = stopAllLeveling,
+        displayStats = displayAllPetStats,
+        scanner = scanner,
+        addedConn = addedConn,
+        removedConn = removedConn
+    }
+    
+else
+    warn(string.format("Debris folder for %s not found! Make sure the player exists.", TARGET_PLAYER))
+end
