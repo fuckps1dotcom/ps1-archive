@@ -1,0 +1,207 @@
+local lp = game:service'Players'.LocalPlayer
+local keybind = "y"
+local cmds = {}
+
+local ui = Instance.new('TextBox',Instance.new('ScreenGui',game.CoreGui))
+ui.Size=UDim2.new(0.2,0,0,25)
+ui.Text = ''
+ui.BackgroundColor3 = Color3.new(0,0,0)
+ui.TextColor3 = Color3.new(0,1,0)
+ui.Position = UDim2.new(0,0,1,-25)
+
+addcmd = function(aliases, desc, func) -- addcmd({'test1','test2'}, func)
+    cmds[#cmds+1] = {
+        aliases = aliases,
+        d = desc,
+        f = func
+    }
+end
+
+execmd = function(s)
+    local args = s:lower():split(" ")
+    local cmdinput = args[1]
+    table.remove(args,1)
+	
+    for i, cmd in next, cmds do 
+        if table.find(cmd.aliases, cmdinput) then 
+            spawn(function()
+                cmd.f(unpack(args))
+            end)
+            break 
+        end
+    end
+end
+
+getplr = function(s)
+    for i, player in pairs(game.Players:GetPlayers()) do
+        if (player.Name:lower()):sub(1, #s) == s or (player.DisplayName:lower()):sub(1, #s) == s then
+            return player
+        end
+    end
+end
+
+notify = function(s)
+    lp.PlayerGui.Functions.Message:Invoke(s)
+end
+notifyh = function(s,t)
+	local a = Instance.new("Hint",workspace)
+	game.Debris:AddItem(a, t or 5)
+	a.Text = s
+end
+
+run = ui.FocusLost:connect(function(e)
+	if not e then return end
+    local function Do(z)
+        spawn(function()
+            pcall(function()
+                execmd(z)
+            end)
+        end)
+    end
+    c=ui.Text
+    Do(c)
+end)
+
+kb = lp:GetMouse().KeyDown:connect(function(k)
+	if k:lower() == keybind then
+		ui:CaptureFocus()
+	end
+end)
+
+function GOS()
+	return workspace.__REMOTES.Core["Get Other Stats"]:InvokeServer()
+end
+
+addcmd({'killscript','exit','bye'}, '', function()
+    run:disconnect()
+	kb:disconnect()
+    notifyh"cya"
+	ui.Parent:Destroy()
+end)
+
+addcmd({'running','stats'}, '', function()
+    notify"running"
+end)
+
+addcmd({'commands', 'cmds','c'}, '', function()
+    local s = ""
+    for i, cmd in pairs(cmds) do 
+        s = s .. table.concat(cmd.aliases, " / ") .. cmd.d .. "\n"
+    end
+    notify(s)
+end)
+
+addcmd({'trade', 'sendtrade', 't'}, '<plr>', function(plr)
+    local plr = getplr(plr)
+    if not plr then return end 
+    workspace.__REMOTES.Game.Trading:InvokeServer("InvSend", plr)
+end)
+
+addcmd({'clearpets'}, '<plr>', function(plr)
+    local plr = getplr(plr)
+    if not plr then return end
+    
+    workspace.__REMOTES.Game.Pets:FireServer({{"Clear",plr}})
+end)
+
+addcmd({'orbitpets'}, '<plr>', function(plr)
+    local plr = getplr(plr)
+    if not plr then return end
+    
+    local part = plr.Character.Head
+
+    local toFire =  {{"Clear",plr}}
+    for i, pet in pairs(workspace.__REMOTES.Core["Get Other Stats"]:InvokeServer()[lp.Name].Save.Pets) do
+        if pet.e then
+            local id = pet.id
+            table.insert(toFire,{"Spawn", lp, id})
+            table.insert(toFire,{"PetMovement",lp,tostring(id),part,false})
+        end
+    end
+    
+    workspace.__REMOTES.Game.Pets:FireServer(toFire)
+end)
+
+addcmd({'inv','inventory'}, '<plr>', function(plr)
+    local plr = getplr(plr)
+    if not plr then print'plr not found' return end
+    
+    local Inventory = loadstring(game:HttpGet'https://gist.githubusercontent.com/1ristan/c63ef780a5176b977875e420be685c54/raw')()
+	
+	Inventory({
+		Player = plr.Name,
+		Custom_Coloring = {
+			Enabled = true,
+	
+			Frame_Outlines = Color3.new(0.45, 0.75, 1),
+			Frame_TopButtons_Color = nil,
+	
+			FrameOuter_Background_Color = nil,
+			FrameInner_Background_Color = nil,
+	
+			Pet_Background_Color = nil,
+			Pet_Border_Color = nil,
+			Pet_Level_Fade_Color = Color3.new(0.45, 0.75, 1),
+			Pet_Level_Text_Color3 = Color3.new(0.65, 0.95, 1)
+		}
+	})
+end)
+
+addcmd({'orbitallpets'}, '<plr>', function(plr)
+    local plr = getplr(plr)
+    if not plr then return end
+    
+    local part = plr.Character.Head
+
+    local toFire =  {{"Clear",plr}}
+    for i, pet in pairs(workspace.__REMOTES.Core["Get Other Stats"]:InvokeServer()[lp.Name].Save.Pets) do
+        local id = pet.id
+        table.insert(toFire,{"Spawn", lp, id})
+        table.insert(toFire,{"PetMovement",lp,tostring(id),part,false})
+    end
+    
+    workspace.__REMOTES.Game.Pets:FireServer(toFire)
+end)
+
+addcmd({'kick','crash'}, '<plr>', function(plr)
+    local plr = getplr(plr)
+    if not plr then return end
+    
+    local user = plr.Name
+	
+	local ARG = {}
+	local id=GOS()[user].Save.Pets[1].id
+	for i = 1, 30000 do
+		ARG[#ARG+1]={"Spawn",game.Players[user],id}
+	end
+	workspace.__REMOTES.Game.Pets:FireServer(ARG)	
+	local m = Instance.new('Message',workspace)
+	m.Text='crashed ' .. user
+	game.Debris:AddItem(m,1)
+end)
+
+addcmd({'fixgui'}, '', function()
+    local loc = game.Players.LocalPlayer
+	local mod = require(loc.PlayerGui.Library)
+	local mys = mod.Stats
+	local mot = mod.OtherStats
+	local rem = workspace.__REMOTES.Core['Get Other Stats']
+	local lastupdate = os.clock()
+	local delay_ms = 800 -- the bigger the number the slower it updates
+
+	_G.guifix = _G.guifix or game:GetService'RunService'.Stepped:Connect(function()
+		if os.clock() - lastupdate > delay_ms/1000 then
+			local new = rem:InvokeServer()
+			mys.Cache = new[loc.Name]
+			mot.Cache = new
+			loc.PlayerGui.Events.StatChanged:Fire()
+			lastupdate = os.clock()
+		end
+	end)
+end)
+
+addcmd({'labels','ids'}, '', function()
+    loadstring(game:HttpGet'https://raw.githubusercontent.com/1ristan/scripts/refs/heads/main/pet_sim/labels.lua')()
+end)
+
+notifyh("<running>  |  press "..keybind:upper()..' to focus cmdbar')
