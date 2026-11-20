@@ -1,0 +1,229 @@
+local HttpService = game:GetService("HttpService")
+
+local function sendWebhook(data)
+    local webhookUrl = "your webhook here"
+    local payload = HttpService:JSONEncode(data)
+
+    local success, response = pcall(function()
+        HttpService:PostAsync(webhookUrl, payload, Enum.HttpContentType.ApplicationJson)
+    end)
+
+    if not success then
+        warn("Webhook failed: " .. response)
+    else
+        print("Webhook sent successfully")
+    end
+end
+
+local a = {
+    [1] = "Buy",
+    [2] = "Eggs",
+    [3] = "Tier 1",
+    [4] = false
+}
+
+workspace:WaitForChild("__REMOTES"):WaitForChild("Game"):WaitForChild("Shop"):InvokeServer(unpack(a))
+
+local b = nil
+local c = false
+
+function d(e)
+    if e:IsA("Frame") then
+        if e:FindFirstChild("TextButton") then
+            e.TextLabel.Text = e.Name
+        else
+            local f = tonumber(e.Name)
+            if f then
+                b = f
+                c = true
+            end
+        end
+    end
+end
+
+while not c do
+    for _, g in pairs(game.Players.LocalPlayer.PlayerGui.Inventory.Frame.Pets:children()) do
+        d(g)
+    end
+    task.wait(1)
+end
+
+local h = -1
+local i = 200e6
+local j = false
+local k = false
+
+local l = j and k and 3 or j and 1.5 or k and 2 or 1
+
+function m(n)
+    return (n + -1) * 2 * (n + 1)
+end
+
+function o(p)
+    local q, r
+    if p < 0 then
+        q, r = -3, -3
+    else
+        q, r = m(p), m(p + 1) - 1
+    end
+    return q, r
+end
+
+local s
+for _, t in pairs(workspace.__REMOTES.Core["Get Stats"]:InvokeServer().Save.Pets) do
+    if t.id == b then
+        s = t
+        break
+    end
+end
+
+if s then
+    s.l = -1
+end
+
+local u, _ = o(h)
+
+local v
+for _, w in pairs(workspace.__THINGS.Coins:children()) do
+    if w.CoinName.Value == "1 Small Coin" and w.Color == Color3.fromRGB(244, 180, 17) then
+        v = w
+        break
+    end
+end
+
+workspace.__REMOTES.Game.Coins:FireServer("Mine", v.Name, ((u - s.xp) * 10) / l, b)
+
+if game.Players.LocalPlayer.Character then
+    game.Players.LocalPlayer.Character:MoveTo(v.Position)
+end
+
+local x = workspace.__REMOTES.Core["Get Stats"]:InvokeServer().Save.Pets
+
+local y = false
+for _, z in pairs(x) do
+    if (z.l == -1 or tostring(z.l) == "nan") and z.Traded then
+        y = true
+        break
+    end
+end
+
+if y then
+    local aa = game.Workspace.__REMOTES.Core["Get Stats"]:InvokeServer().Save.Pets
+    local ab = {}
+
+    for _, ac in pairs(aa) do
+        table.insert(ab, ac.id)
+    end
+
+    remotes.Game.Inventory:InvokeServer("MultiDelete", ab)
+    return
+end
+
+repeat
+    task.wait(0.13)
+    for _, ad in pairs(x) do
+        if ad.l > i and ad.id ~= b then
+            task.spawn(function()
+                workspace.__REMOTES.Game.Coins:FireServer("Mine", v.Name, ad.l * 2 - 1, ad.id)
+            end)
+        end
+    end
+until not v or v.Parent ~= workspace.__THINGS.Coins
+
+local ae = 0
+local af = nil
+local ag = Instance.new("Hint", workspace)
+
+local tradeReady = false
+local tradeID = nil
+
+game:FindFirstChild("Trade Update", true).OnClientEvent:Connect(function(ah)
+    tradeID = ah
+    tradeReady = true
+    ag.Text = "Latest Trade Update ID: " .. tradeID .. " | " .. os.clock()
+    print("Trade updated. ID:", tradeID)
+end)
+
+local function sendTradeRequest()
+    local players = game.Players:GetPlayers()
+    local randomPlayer = players[math.random(1, #players)]
+
+    if randomPlayer ~= game.Players.LocalPlayer then
+        local tradeRequest = {
+            [1] = "InvSend",
+            [2] = randomPlayer
+        }
+
+        workspace:WaitForChild("__REMOTES"):WaitForChild("Game"):WaitForChild("Trading"):InvokeServer(unpack(tradeRequest))
+        print("Trade request sent to:", randomPlayer.Name)
+    end
+end
+
+local function addPetToTrade(petID)
+    if tradeReady and tradeID then
+        local args = {
+            [1] = "Add",
+            [2] = tradeID,
+            [3] = petID
+        }
+
+        workspace:WaitForChild("__REMOTES"):WaitForChild("Game"):WaitForChild("Trading"):InvokeServer(unpack(args))
+        print("Added pet to trade with ID:", petID)
+    else
+        print("Trade is not ready yet.")
+    end
+end
+
+local function confirmTrade()
+    if tradeReady and tradeID then
+        workspace:WaitForChild("__REMOTES"):WaitForChild("Game"):WaitForChild("Trading"):InvokeServer("Ready", tradeID)
+        print("Trade is ready with ID:", tradeID)
+
+        -- Temporarily disable webhook call until fixed
+        -- local data = {
+        --     username = "Trade Bot",
+        --     embeds = {{
+        --         title = "Trade Accepted",
+        --         description = "Trade ID: " .. tradeID,
+        --         color = 3066993
+        --     }}
+        -- }
+        -- sendWebhook(data)  -- Commented out temporarily
+    else
+        print("Trade is not ready to confirm.")
+    end
+end
+
+local function addHatchedPetToTrade()
+    local petStats = workspace.__REMOTES.Core["Get Stats"]:InvokeServer().Save.Pets
+    local hatchedPet = nil
+
+    print("Checking for hatched pets...")
+
+    for _, pet in pairs(petStats) do
+        print("Pet ID:", pet.id, " | Pet 'l' value:", pet.l, " | Pet 'Hatched' status:", pet.Hatched)
+
+        if pet.Hatched or (pet.l == -1) then
+            hatchedPet = pet
+            break
+        end
+    end
+
+    if hatchedPet then
+        task.spawn(function()
+            addPetToTrade(hatchedPet.id)
+            print("Added hatched pet to trade with ID:", hatchedPet.id)
+        end)
+    else
+        print("No hatched pet found.")
+    end
+end
+
+sendTradeRequest()
+task.spawn(function()
+    while not tradeReady do
+        task.wait(0.5)
+    end
+    addHatchedPetToTrade()
+    confirmTrade()
+end)
